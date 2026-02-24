@@ -3,24 +3,28 @@ export const ctfs = [
         id: "0xfunctf-2026",
         name: "0xFUN CTF 2026",
         date: "Feb 13 - 15, 2026",
+        summary: "A high-energy international CTF featuring advanced cryptography and lattice-based challenges.",
         icon: "Target"
     },
     {
         id: "bitsctf-2026",
         name: "BITSCTF 2026",
         date: "Feb 20 - 22, 2026",
+        summary: "The flagship event by BITS Pilani, focused on blockchain security, kernel exploitation, and web internals.",
         icon: "Target"
     },
     {
         id: "bearcatCTF-2026",
         name: "Bearcat CTF 2026 - Setting Sail",
         date: "Feb 22 - 23, 2026",
+        summary: "An entry-level yet technical competition covering a wide range of standard CTF categories.",
         icon: "Target"
     },
     {
         id: "ramadanCTF-2026",
         name: "RamadanCTF 2026",
         date: "18 Feb. 2026 - 17 March 2026",
+        summary: "A month-long marathon of diverse security challenges designed to push solvers to their limits.",
         icon: "Target"
     }
 ];
