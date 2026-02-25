@@ -72,12 +72,19 @@ const WriteupDetail = () => {
 
             <div className="glass markdown-container">
                 <style>{`
-          .markdown-container { overflow-wrap: break-word; word-wrap: break-word; }
+          .markdown-container { overflow-wrap: anywhere; word-break: break-word; }
+          .markdown-container * { max-width: 100%; }
           .markdown-container h1 { margin: 2rem 0 1rem; font-size: 2.5rem; }
           .markdown-container h2 { margin: 2rem 0 1rem; font-size: 1.8rem; color: var(--primary); }
           .markdown-container p { margin-bottom: 1.5rem; color: var(--text-main); font-size: 1.1rem; line-height: 1.8; }
-          .markdown-container p code, .markdown-container li code { background: rgba(255,255,255,0.05); padding: 0.2rem 0.4rem; border-radius: 4px; font-family: 'Fira Code', monospace; font-size: 0.9rem; word-break: break-word; overflow-wrap: anywhere; }
-          .markdown-container pre { max-width: 100%; overflow-x: auto; }
+          
+          /* Catch ALL inline code not inside syntax highlighter */
+          .markdown-container code { background: rgba(255,255,255,0.05); padding: 0.2rem 0.4rem; border-radius: 4px; font-family: 'Fira Code', monospace; font-size: 0.9rem; word-break: break-all; overflow-wrap: anywhere; white-space: pre-wrap; }
+          
+          /* Override for syntax highlighter code blocks */
+          .code-block-wrapper code { background: transparent !important; padding: 0 !important; white-space: pre !important; word-break: normal !important; border-radius: 0 !important; }
+          
+          .markdown-container pre { max-width: 100%; overflow-x: auto; white-space: pre; }
           .markdown-container ul { margin-bottom: 1.5rem; padding-left: 1.5rem; list-style: disc; }
           .markdown-container li { margin-bottom: 0.5rem; color: var(--text-main); }
         `}</style>
