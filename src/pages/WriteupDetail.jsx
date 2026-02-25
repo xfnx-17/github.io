@@ -59,7 +59,7 @@ const WriteupDetail = () => {
                     </span>
                 </div>
 
-                <h1 style={{ fontSize: '3.5rem', marginBottom: '2rem' }}>{writeup.title}</h1>
+                <h1 className="writeup-title">{writeup.title}</h1>
 
                 <div style={{ display: 'flex', gap: '0.8rem', flexWrap: 'wrap' }}>
                     {writeup.tags?.map(tag => (
@@ -70,14 +70,14 @@ const WriteupDetail = () => {
                 </div>
             </header>
 
-            <div className="glass markdown-container" style={{ padding: '4rem', background: 'rgba(20, 20, 23, 0.4)' }}>
+            <div className="glass markdown-container">
                 <style>{`
+          .markdown-container { overflow-wrap: break-word; word-wrap: break-word; }
           .markdown-container h1 { margin: 2rem 0 1rem; font-size: 2.5rem; }
           .markdown-container h2 { margin: 2rem 0 1rem; font-size: 1.8rem; color: var(--primary); }
           .markdown-container p { margin-bottom: 1.5rem; color: var(--text-main); font-size: 1.1rem; line-height: 1.8; }
-          .markdown-container code { background: rgba(255,255,255,0.05); padding: 0.2rem 0.4rem; border-radius: 4px; font-family: 'Fira Code', monospace; font-size: 0.9rem; }
-          /* .markdown-container pre { background: #1a1a1e; padding: 2rem; border-radius: 12px; margin: 2rem 0; overflow-x: auto; border: 1px solid var(--border); } */
-          /* .markdown-container pre code { background: none; padding: 0; } */
+          .markdown-container p code, .markdown-container li code { background: rgba(255,255,255,0.05); padding: 0.2rem 0.4rem; border-radius: 4px; font-family: 'Fira Code', monospace; font-size: 0.9rem; word-break: break-word; overflow-wrap: anywhere; }
+          .markdown-container pre { max-width: 100%; overflow-x: auto; }
           .markdown-container ul { margin-bottom: 1.5rem; padding-left: 1.5rem; list-style: disc; }
           .markdown-container li { margin-bottom: 0.5rem; color: var(--text-main); }
         `}</style>
@@ -87,10 +87,10 @@ const WriteupDetail = () => {
                             const match = /language-(\w+)/.exec(className || '');
                             return !inline && match ? (
                                 <SyntaxHighlighter
+                                    className="code-block-wrapper"
                                     style={vscDarkPlus}
                                     language={match[1]}
                                     PreTag="div"
-                                    customStyle={{ margin: '2rem 0', borderRadius: '12px', padding: '2rem', background: '#1a1a1e', border: '1px solid var(--border)' }}
                                     {...props}
                                 >
                                     {String(children).replace(/\n$/, '')}

@@ -14,33 +14,21 @@ const Home = () => {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.6 }}
                 >
-                    <div style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '0.5rem',
-                        padding: '0.4rem 1rem',
-                        background: 'rgba(155, 89, 182, 0.1)',
-                        border: '1px solid rgba(155, 89, 182, 0.2)',
-                        borderRadius: '20px',
-                        color: 'var(--primary)',
-                        fontSize: '0.8rem',
-                        fontWeight: 600,
-                        marginBottom: '2rem'
-                    }}>
+                    <div className="badge">
                         <Shield size={14} /> CTF WRITEUPS
                     </div>
 
-                    <h1 style={{ fontSize: '4.5rem', lineHeight: 1.1, marginBottom: '1.5rem', fontWeight: 800 }}>
+                    <h1 className="hero-title">
                         Decrypting the <br />
                         <span className="gradient-text">Unseen Reality.</span>
                     </h1>
 
-                    <p style={{ maxWidth: '600px', margin: '0 auto 3rem', color: 'var(--text-dim)', fontSize: '1.1rem' }}>
+                    <p style={{ maxWidth: '600px', margin: '0 auto 3rem', color: 'var(--text-dim)', fontSize: '1.1rem', padding: '0 1rem' }}>
                         A collection of technical deep-dives and CTF solutions by
                         Xfnx. Building things, breaking things, and learning everything.
                     </p>
 
-                    <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+                    <div className="hero-buttons">
                         <Link to="/writeups" className="btn-primary">
                             Explore Writeups <ChevronRight size={18} />
                         </Link>
@@ -48,8 +36,7 @@ const Home = () => {
                             href="https://github.com/xfnx-17"
                             target="_blank"
                             rel="noreferrer"
-                            className="glass"
-                            style={{ padding: '0.8rem 1.6rem', borderRadius: '8px', fontWeight: 600, display: 'flex', alignItems: 'center' }}
+                            className="glass btn-secondary"
                         >
                             View Github
                         </a>
@@ -59,9 +46,9 @@ const Home = () => {
 
             {/* Challenge Categories Section */}
             <section style={{ marginBottom: '8rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '3rem' }}>
+                <div className="flex-between">
                     <div>
-                        <h2 style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>Challenges</h2>
+                        <h2 className="section-title">Challenges</h2>
                         <p style={{ color: 'var(--text-dim)' }}>Browse writeups by category</p>
                     </div>
                     <Link to="/writeups" style={{ color: 'var(--primary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -81,7 +68,7 @@ const Home = () => {
                     };
                     const categories = [...new Set(writeups.map(w => w.category))];
                     return (
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '2rem' }}>
+                        <div className="cards-grid-small">
                             {categories.map((cat, i) => {
                                 const count = writeups.filter(w => w.category === cat).length;
                                 const meta = categoryIcons[cat] || { icon: <Search size={24} />, desc: 'Various challenges.' };

@@ -19,7 +19,7 @@ const WriteupsByCategory = () => {
                 animate={{ opacity: 1, y: 0 }}
                 style={{ marginBottom: '4rem' }}
             >
-                <h1 style={{ fontSize: '3rem', marginBottom: '1rem' }}>
+                <h1 className="page-title">
                     <span className="gradient-text">{decodeURIComponent(category)}</span> Challenges
                 </h1>
                 <p style={{ color: 'var(--text-dim)', fontSize: '1.1rem' }}>
@@ -38,7 +38,7 @@ const WriteupsByCategory = () => {
                     <p>Check back later for writeups in this category.</p>
                 </motion.div>
             ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '2rem' }}>
+                <div className="cards-grid">
                     {filteredWriteups.map((w, i) => {
                         const ctf = ctfs.find(c => c.id === w.ctfId);
                         return (

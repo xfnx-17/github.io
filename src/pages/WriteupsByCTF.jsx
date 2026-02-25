@@ -22,13 +22,13 @@ const WriteupsByCTF = () => {
                 animate={{ opacity: 1, y: 0 }}
                 style={{ marginBottom: '4rem' }}
             >
-                <h1 style={{ fontSize: '3rem', marginBottom: '1rem' }}>{ctf.name} <span className="gradient-text">Writeups</span></h1>
+                <h1 className="page-title">{ctf.name} <span className="gradient-text">Writeups</span></h1>
                 <p style={{ color: 'var(--text-dim)', fontSize: '1.1rem' }}>
                     {filteredWriteups.length} challenges solved and documented.
                 </p>
             </motion.div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '2rem' }}>
+            <div className="cards-grid">
                 {filteredWriteups.map((w, i) => (
                     <motion.div
                         key={w.id}

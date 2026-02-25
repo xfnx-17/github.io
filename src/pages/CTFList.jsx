@@ -15,13 +15,13 @@ const CTFList = () => {
                 <Link to="/" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-dim)', fontSize: '0.9rem', marginBottom: '2rem', fontWeight: 600 }}>
                     <ArrowLeft size={16} /> Back to Home
                 </Link>
-                <h1 style={{ fontSize: '3rem', marginBottom: '1rem' }}>CTF <span className="gradient-text">Events</span></h1>
+                <h1 className="page-title">CTF <span className="gradient-text">Events</span></h1>
                 <p style={{ color: 'var(--text-dim)', fontSize: '1.1rem' }}>
                     Select a CTF to explore the challenges and my solutions.
                 </p>
             </motion.div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '2rem' }}>
+            <div className="cards-grid-large">
                 {ctfs.map((ctf, i) => (
                     <motion.div
                         key={ctf.id}

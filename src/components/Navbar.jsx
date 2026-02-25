@@ -18,17 +18,7 @@ const Navbar = () => {
     }, [isMenuOpen]);
 
     return (
-        <nav className="glass" style={{
-            position: 'sticky',
-            top: '1.5rem',
-            margin: '0 2rem',
-            padding: '0.8rem 1.5rem',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            zIndex: 1000,
-            marginTop: '1.5rem'
-        }}>
+        <nav className="glass navbar">
             <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }} onClick={() => setIsMenuOpen(false)}>
                 <div style={{
                     background: 'var(--primary)',
