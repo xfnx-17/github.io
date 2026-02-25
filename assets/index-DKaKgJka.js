@@ -1207,7 +1207,7 @@ The security of RSA relies on the difficulty of factoring $n$ into $p$ and $q$. 
 
 Fermat's Factorization relies on the fact that if $p$ and $q$ are close, $n$ can be expressed as a difference of squares:
 $$n = a^2 - b^2 = (a-b)(a+b)$$
-where $a \\approx \\sqrt{n}$. We can search for $a$ starting from $\\lceil\\sqrt{n}\rceil$ and check if $a^2 - n$ is a perfect square.
+where $a \\approx \\sqrt{n}$. We can search for $a$ starting from $\\lceil\\sqrt{n}\\rceil$ and check if $a^2 - n$ is a perfect square.
 
 Alternatively, since this is a CTF challenge, the prime factors might already be known and stored in **FactorDB**.
 
