@@ -1,7 +1,7 @@
 import React from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ChevronRight, ArrowLeft } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import WriteupCard from '../components/WriteupCard';
 import { writeups, ctfs } from '../data/writeups';
 

@@ -29,9 +29,6 @@ export const ctfs = [
     }
 ];
 
-const createWriteup = (id, ctfId, title, category, date, flag, summary, tags, content) => ({
-    id, ctfId, title, category, date, flag, summary, tags, content
-});
 
 export const writeups = [
     {
