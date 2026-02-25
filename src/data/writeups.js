@@ -1755,5 +1755,60 @@ Running this script progressively leaked the flag, with each correct byte increa
 
 **Flag:** \`VBD{I_kn0w_y0u_w0uld_us3_Opus_hehe_eafa09ad1898e0bcf9c0225076632225}\`
 `
+    },
+    // ─── Paste this into the writeups array in writeups.js ───
+
+    {
+        id: "zippy",
+        ctfId: "ramadanCTF-2026",
+        title: "Zippy",
+        category: "Forensics",
+        date: "Feb 25, 2026", // Corrected year
+        flag: "VBD{c99a11a53a3748269e3f86d7ac38df11}",
+        summary: "This challenge utilizes anti-forensics via NTFS Alternate Data Streams (ADS) to hide a decryption key behind a ZIP archive. The solution involves extracting the hidden metadata and solving a compression-related riddle to derive the MD5-hashed password.",
+        tags: ["Forensics", "ADS", "NTFS", "ArchiveForensics", "RAR5"],
+        content: `
+# Zippy — Forensics
+
+## Overview
+The challenge provides a \`locked_files.rar\` archive containing an encrypted \`locked_files.zip\`. The goal is to find the hidden key mentioned in the hints:
+1. "How much data is lost during compression?"
+2. "Don't keep the lock and key at the same place."
+
+## Initial Analysis
+Listing the RAR contents reveals an NTFS Alternate Data Stream (ADS) attached to the ZIP file:
+- \`locked_files.zip\` (The lock)
+- \`locked_files.zip:forgotpassword\` (The key)
+
+
+
+The \`forgotpassword\` stream is exactly 32 bytes, which is the standard length of an MD5 hash.
+
+## Extraction
+Because Linux (Ext4) does not natively support ADS, standard extraction tools often fail to retrieve the stream data. To successfully access the key, the archive must be extracted on a Windows/NTFS environment.
+
+Using **PowerShell** allows for direct access to the stream:
+
+\`\`\`powershell
+# Identify the hidden streams
+Get-Item .\\locked_files.zip -Stream *
+
+# Extract the key content
+$key = Get-Content .\\locked_files.zip -Stream forgotpassword
+# Output: 8d364896e034aabe3fc9fd2e05fb1cbe
+\`\`\`
+
+## Solution
+The first hint asks how much data is lost during ZIP compression. Since ZIP is a **lossless** format, the answer is **"nothing"**. The extracted key is the MD5 hash of "nothing":
+
+\`echo -n "nothing" | md5sum\` -> \`8d364896e034aabe3fc9fd2e05fb1cbe\`
+
+
+
+Using this hash as the password for the ZIP archive successfully unlocks the flag.
+
+## Flag
+\`VBD{c99a11a53a3748269e3f86d7ac38df11}\`
+`
     }
 ];

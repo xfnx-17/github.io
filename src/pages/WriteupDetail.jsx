@@ -1,6 +1,8 @@
 import React, { useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Calendar, Tag, Clock } from 'lucide-react';
 import { writeups, ctfs } from '../data/writeups';
@@ -74,12 +76,35 @@ const WriteupDetail = () => {
           .markdown-container h2 { margin: 2rem 0 1rem; font-size: 1.8rem; color: var(--primary); }
           .markdown-container p { margin-bottom: 1.5rem; color: var(--text-main); font-size: 1.1rem; line-height: 1.8; }
           .markdown-container code { background: rgba(255,255,255,0.05); padding: 0.2rem 0.4rem; border-radius: 4px; font-family: 'Fira Code', monospace; font-size: 0.9rem; }
-          .markdown-container pre { background: #1a1a1e; padding: 2rem; border-radius: 12px; margin: 2rem 0; overflow-x: auto; border: 1px solid var(--border); }
-          .markdown-container pre code { background: none; padding: 0; }
+          /* .markdown-container pre { background: #1a1a1e; padding: 2rem; border-radius: 12px; margin: 2rem 0; overflow-x: auto; border: 1px solid var(--border); } */
+          /* .markdown-container pre code { background: none; padding: 0; } */
           .markdown-container ul { margin-bottom: 1.5rem; padding-left: 1.5rem; list-style: disc; }
           .markdown-container li { margin-bottom: 0.5rem; color: var(--text-main); }
         `}</style>
-                <ReactMarkdown>{writeup.content}</ReactMarkdown>
+                <ReactMarkdown
+                    components={{
+                        code({ node, inline, className, children, ...props }) {
+                            const match = /language-(\w+)/.exec(className || '');
+                            return !inline && match ? (
+                                <SyntaxHighlighter
+                                    style={vscDarkPlus}
+                                    language={match[1]}
+                                    PreTag="div"
+                                    customStyle={{ margin: '2rem 0', borderRadius: '12px', padding: '2rem', background: '#1a1a1e', border: '1px solid var(--border)' }}
+                                    {...props}
+                                >
+                                    {String(children).replace(/\n$/, '')}
+                                </SyntaxHighlighter>
+                            ) : (
+                                <code className={className} {...props}>
+                                    {children}
+                                </code>
+                            );
+                        }
+                    }}
+                >
+                    {writeup.content}
+                </ReactMarkdown>
             </div>
         </motion.div>
     );
