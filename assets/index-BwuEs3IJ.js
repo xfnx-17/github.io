@@ -432,7 +432,7 @@ if (typeof folder === "string" && folder.includes("..")) {
     return status(400, "Invalid folder path");
 }
 try {
-    const result = $\`ls \${folder}\`.quiet(); // Command Injection
+    const result = $\`ls \\${folder}\`.quiet(); // Command Injection
     // ...
 }
 \`\`\`
@@ -1135,7 +1135,7 @@ This is a classic boolean algebra obfuscation. If we map it out logically, we ha
 This is the exact logical definition of the **Exclusive OR (XOR)** operation (\`A ⊕ B\`). 
 
 * For the first 14 characters, the key \`B\` is the 1-based index \`i\`.
-* For the last 14 characters (\`i in [15, 28]\`), the key \`B\` is \`(29 - i)\`.
+* For the last 14 characters (\`i \\in [15, 28]\`), the key \`B\` is \`(29 - i)\`.
 
 ## The Exploit
 
@@ -1207,7 +1207,7 @@ The security of RSA relies on the difficulty of factoring $n$ into $p$ and $q$. 
 
 Fermat's Factorization relies on the fact that if $p$ and $q$ are close, $n$ can be expressed as a difference of squares:
 $$n = a^2 - b^2 = (a-b)(a+b)$$
-where $a approx sqrt{n}$. We can search for $a$ starting from $lceilsqrt{n}\rceil$ and check if $a^2 - n$ is a perfect square.
+where $a \\approx \\sqrt{n}$. We can search for $a$ starting from $\\lceil\\sqrt{n}\rceil$ and check if $a^2 - n$ is a perfect square.
 
 Alternatively, since this is a CTF challenge, the prime factors might already be known and stored in **FactorDB**.
 
