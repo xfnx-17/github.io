@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import PropTypes from 'prop-types';
 import { useParams, Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -24,6 +25,13 @@ const MarkdownCode = ({ node, inline, className, children, ...props }) => {
             {children}
         </code>
     );
+};
+
+MarkdownCode.propTypes = {
+    node: PropTypes.object,
+    inline: PropTypes.bool,
+    className: PropTypes.string,
+    children: PropTypes.node
 };
 
 const WriteupDetail = () => {
