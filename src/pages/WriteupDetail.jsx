@@ -8,7 +8,7 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, Calendar, Tag, Clock } from 'lucide-react';
 import { writeups, ctfs } from '../data/writeups';
 
-const MarkdownCode = ({ node, inline, className, children, ...props }) => {
+const MarkdownCode = ({ _node, inline, className, children, ...props }) => {
     const match = /language-(\w+)/.exec(className || '');
     return !inline && match ? (
         <SyntaxHighlighter
@@ -28,7 +28,7 @@ const MarkdownCode = ({ node, inline, className, children, ...props }) => {
 };
 
 MarkdownCode.propTypes = {
-    node: PropTypes.object,
+    _node: PropTypes.object,
     inline: PropTypes.bool,
     className: PropTypes.string,
     children: PropTypes.node

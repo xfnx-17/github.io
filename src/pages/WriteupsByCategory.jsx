@@ -1,6 +1,7 @@
 import React from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { ArrowLeft, TerminalSquare } from 'lucide-react';
 import WriteupCard from '../components/WriteupCard';
 import { writeups, ctfs } from '../data/writeups';
 

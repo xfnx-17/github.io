@@ -523,7 +523,7 @@ if (typeof folder === "string" && folder.includes("..")) {
     return status(400, "Invalid folder path");
 }
 try {
-    const result = $\`ls \\${folder}\`.quiet(); // Command Injection
+    const result = $\`ls \${folder}\`.quiet(); // Command Injection
     // ...
 }
 \`\`\`
