@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Shield, Lock, Terminal, Globe, Database, Cpu, Search, ChevronRight } from 'lucide-react';
-import { writeups, ctfs } from '../data/writeups';
+import { writeups } from '../data/writeups';
 import { Link } from 'react-router-dom';
 
 const Home = () => {
@@ -97,7 +97,7 @@ const Home = () => {
                                         <h3 style={{ fontSize: '1.3rem' }}>{cat}</h3>
                                         <p style={{ color: 'var(--text-dim)', fontSize: '0.9rem', flexGrow: 1 }}>{meta.desc}</p>
                                         <span style={{ fontSize: '0.8rem', color: 'var(--primary)', fontWeight: 700 }}>
-                                            {count} writeup{count !== 1 ? 's' : ''}
+                                            {count} writeup{count === 1 ? '' : 's'}
                                         </span>
                                         <Link to={`/category/${encodeURIComponent(cat)}`} style={{
                                             display: 'flex',

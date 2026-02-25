@@ -7,6 +7,25 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, Calendar, Tag, Clock } from 'lucide-react';
 import { writeups, ctfs } from '../data/writeups';
 
+const MarkdownCode = ({ node, inline, className, children, ...props }) => {
+    const match = /language-(\w+)/.exec(className || '');
+    return !inline && match ? (
+        <SyntaxHighlighter
+            className="code-block-wrapper"
+            style={vscDarkPlus}
+            language={match[1]}
+            PreTag="div"
+            {...props}
+        >
+            {String(children).replace(/\n$/, '')}
+        </SyntaxHighlighter>
+    ) : (
+        <code className={className} {...props}>
+            {children}
+        </code>
+    );
+};
+
 const WriteupDetail = () => {
     const { id } = useParams();
     const writeup = writeups.find(w => w.id === id);
@@ -90,24 +109,7 @@ const WriteupDetail = () => {
         `}</style>
                 <ReactMarkdown
                     components={{
-                        code({ node, inline, className, children, ...props }) {
-                            const match = /language-(\w+)/.exec(className || '');
-                            return !inline && match ? (
-                                <SyntaxHighlighter
-                                    className="code-block-wrapper"
-                                    style={vscDarkPlus}
-                                    language={match[1]}
-                                    PreTag="div"
-                                    {...props}
-                                >
-                                    {String(children).replace(/\n$/, '')}
-                                </SyntaxHighlighter>
-                            ) : (
-                                <code className={className} {...props}>
-                                    {children}
-                                </code>
-                            );
-                        }
+                        code: MarkdownCode
                     }}
                 >
                     {writeup.content}

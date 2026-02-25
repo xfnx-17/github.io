@@ -23,7 +23,7 @@ const WriteupsByCategory = () => {
                     <span className="gradient-text">{decodeURIComponent(category)}</span> Challenges
                 </h1>
                 <p style={{ color: 'var(--text-dim)', fontSize: '1.1rem' }}>
-                    {filteredWriteups.length} writeup{filteredWriteups.length !== 1 ? 's' : ''} across all CTF events
+                    {filteredWriteups.length} writeup{filteredWriteups.length === 1 ? '' : 's'} across all CTF events
                 </p>
             </motion.div>
 
