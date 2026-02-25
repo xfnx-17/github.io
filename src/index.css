@@ -30,7 +30,12 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   font-family: 'Outfit', sans-serif;
   color: var(--text-bright);
 }
@@ -120,7 +125,7 @@ ul {
   width: 100%;
   height: 100%;
   z-index: -1;
-  background: 
+  background:
     radial-gradient(circle at 10% 10%, rgba(155, 89, 182, 0.05) 0%, transparent 40%),
     radial-gradient(circle at 90% 90%, rgba(155, 89, 182, 0.08) 0%, transparent 40%);
 }
@@ -140,8 +145,15 @@ ul {
 
 /* Animations */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .animate-fade {
@@ -164,9 +176,9 @@ ul {
   top: 100%;
   left: 0;
   right: 0;
-  background: rgba(20, 20, 23, 0.95);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: rgba(20, 20, 23, 0.98);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   padding: 1rem;
   margin-top: 1rem;
   border-radius: 12px;
@@ -174,7 +186,9 @@ ul {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  transform: translateZ(0);
+  will-change: transform, opacity;
 }
 
 .mobile-menu a {
@@ -192,6 +206,7 @@ ul {
   .desktop-nav {
     display: none !important;
   }
+
   .mobile-nav-toggle {
     display: block !important;
   }
