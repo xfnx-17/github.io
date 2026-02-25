@@ -22,7 +22,7 @@ const CTFList = () => {
             </motion.div>
 
             <div className="cards-grid-large">
-                {ctfs.map((ctf, i) => (
+                {[...ctfs].reverse().map((ctf, i) => (
                     <motion.div
                         key={ctf.id}
                         initial={{ opacity: 0, y: 20 }}
