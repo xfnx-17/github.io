@@ -13,6 +13,7 @@ dist-ssr
 *.local
 
 writeup-editor.html
+un-uplodedctf.txt
 
 # Editor directories and files
 .vscode/*

@@ -26,6 +26,13 @@ export const ctfs = [
         date: "18 Feb. 2026 - 17 March 2026",
         summary: "A month-long marathon of diverse security challenges designed to push solvers to their limits.",
         icon: "Target"
+    },
+    {
+    id: "univsthreats26-quals",
+    name: "UniVsThreats26 Quals",
+    date: "Feb 27 - 28, 2026",
+    summary: "UniVsThreats CTF is a cybersecurity competition organized by the West university of Timisoara, designed for students and high schoolers who want to test their skills.",
+    icon: "Target"
     }
 ];
 
@@ -1810,6 +1817,82 @@ Using this hash as the password for the ZIP archive successfully unlocks the fla
 
 ## Flag
 \`VBD{c99a11a53a3748269e3f86d7ac38df11}\`
+`
+    },
+    {
+    id: "bro-is-not-an-astronaut",
+    ctfId: "UniVsThreats26 Quals",
+    title: "Bro is not an astronaut",
+    category: "Forensics",
+    date: "Feb 27, 2026",
+    flag: "UVT{d0nt_k33p_d1GG1in_U_sur3ly_w0Nt_F1nD_aNythng_:)}",
+    summary: "Carved an ext2 cache partition from a raw disk image, extracted unallocated inodes using Sleuth Kit, and brute-forced a sliding-window XOR payload to bypass variable padding.",
+    tags: ["disk-image", "ext2", "sleuthkit", "xor", "brute-force", "python"],
+    content: `
+# Bro is not an astronaut
+
+## Overview
+We were given a disk image (\`space_usb.img\`) retrieved from a drifting spaceship. Initial analysis with \`mmls\` and \`binwalk\` revealed a GUID Partition Table containing a suspicious, unrecognizable \`ASTRA9_USER\` partition and an unclean \`ext2\` filesystem named \`ASTRA9_CACHE\`. 
+
+## File Recovery (The Sleuth Kit)
+Extracting and analyzing the \`ext2\` partition revealed empty \`/diagnostics\` and \`/tmp\` directories, indicating an intentional wipe. Because it was an \`ext2\` filesystem without a journal, standard tools like \`extundelete\` failed. 
+
+To bypass this, I used **The Sleuth Kit** (\`ils\` and \`icat\`) to manually carve out all unallocated inodes:
+
+\`\`\`bash
+# List unallocated inodes and extract them
+ils ASTRA9_CACHE.ext2 | awk -F'|' 'NR>1 {print $1}' > inodes.txt
+for i in $(cat inodes.txt); do 
+    icat ASTRA9_CACHE.ext2 $i > TSK_RECOVERED/inode_$i.bin
+done
+\`\`\`
+
+## Reversing the Telemetry Format
+A recovered plaintext debrief log explained that the station token was split into three fragments (alpha, bravo, charlie), padded, and XOR encrypted with a key named \`diag_key.bin\`. 
+
+Hex analysis of the fragments revealed a 7-byte \`TLM\` header. However, the padding was highly variable, and the encrypted payloads were hidden at unpredictable offsets within the files. Standard offset alignment decryption resulted in garbage data.
+
+## Solution: Sliding Window Brute-Force
+To bypass the unpredictable padding, I wrote a Python script to perform a sliding-window XOR brute-force. It tested every small recovered binary as a potential key, XORed every possible byte offset of the telemetry fragments, and extracted the longest continuous string of printable ASCII characters.
+
+\`\`\`python
+import os
+import glob
+import string
+
+def xor_data(data, key):
+    if not key: return data
+    return bytes([b ^ key[i % len(key)] for i, b in enumerate(data)])
+
+# ... (Fragment and key loading logic) ...
+
+valid_chars = set((string.ascii_letters + string.digits + string.punctuation).encode('ascii'))
+
+for key_name, key_data in keys:
+    for f_name, seq, data in fragments:
+        found_strings = []
+        
+        # Test every possible start offset for the encrypted payload
+        for offset in range(7, len(data)):
+            decrypted = xor_data(data[offset:], key_data)
+            
+            # Find longest continuous sequence of valid ASCII
+            prefix = bytearray()
+            for b in decrypted:
+                if b in valid_chars:
+                    prefix.append(b)
+                else:
+                    break # Hit trailing padding
+                    
+            clean_str = prefix.decode('ascii', errors='ignore')
+            if len(clean_str) >= 5: 
+                found_strings.append((offset, clean_str))
+\`\`\`
+
+Executing the script identified \`inode_20.bin\` (a 16-byte file) as the correct XOR key. The script successfully extracted the three token parts, bypassing both the prepended and trailing padding to yield the final station override code.
+
+## Flag
+\`UVT{d0nt_k33p_d1GG1in_U_sur3ly_w0Nt_F1nD_aNythng_:)}\`
 `
     }
 ];
