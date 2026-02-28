@@ -46,7 +46,13 @@ Open `src/data/writeups.js` and add a new object to the array. You can use Markd
 ### 4. Deployment
 To deploy to GitHub Pages:
 1. Ensure your repository is initialized and connected to GitHub.
-2. Run:
+2. Push your latest changes to GitHub:
+```bash
+git add .
+git commit -m "update writeups"
+git push origin main
+```
+3. Run:
 ```bash
 npm run deploy
 ```
