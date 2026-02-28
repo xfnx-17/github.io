@@ -28,11 +28,11 @@ export const ctfs = [
         icon: "Target"
     },
     {
-    id: "univsthreats26-quals",
-    name: "UniVsThreats26 Quals",
-    date: "Feb 27 - 28, 2026",
-    summary: "UniVsThreats CTF is a cybersecurity competition organized by the West university of Timisoara, designed for students and high schoolers who want to test their skills.",
-    icon: "Target"
+        id: "univsthreats26-quals",
+        name: "UniVsThreats26 Quals",
+        date: "Feb 27 - 28, 2026",
+        summary: "UniVsThreats CTF is a cybersecurity competition organized by the West university of Timisoara, designed for students and high schoolers who want to test their skills.",
+        icon: "Target"
     }
 ];
 
@@ -1820,15 +1820,15 @@ Using this hash as the password for the ZIP archive successfully unlocks the fla
 `
     },
     {
-    id: "bro-is-not-an-astronaut",
-    ctfId: "UniVsThreats26 Quals",
-    title: "Bro is not an astronaut",
-    category: "Forensics",
-    date: "Feb 27, 2026",
-    flag: "UVT{d0nt_k33p_d1GG1in_U_sur3ly_w0Nt_F1nD_aNythng_:)}",
-    summary: "Carved an ext2 cache partition from a raw disk image, extracted unallocated inodes using Sleuth Kit, and brute-forced a sliding-window XOR payload to bypass variable padding.",
-    tags: ["disk-image", "ext2", "sleuthkit", "xor", "brute-force", "python"],
-    content: `
+        id: "bro-is-not-an-astronaut",
+        ctfId: "univsthreats26-quals",
+        title: "Bro is not an astronaut",
+        category: "Forensics",
+        date: "Feb 27, 2026",
+        flag: "UVT{d0nt_k33p_d1GG1in_U_sur3ly_w0Nt_F1nD_aNythng_:)}",
+        summary: "Carved an ext2 cache partition from a raw disk image, extracted unallocated inodes using Sleuth Kit, and brute-forced a sliding-window XOR payload to bypass variable padding.",
+        tags: ["disk-image", "ext2", "sleuthkit", "xor", "brute-force", "python"],
+        content: `
 # Bro is not an astronaut
 
 ## Overview
