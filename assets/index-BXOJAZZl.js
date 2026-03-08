@@ -2371,7 +2371,7 @@ However, the SQL injection path is simpler and doesn't require interacting with 
 ## Flag
 
 \`CodeVinci{Tr4ll4ll3r0_Tr4ll4ll4_P*rc*d1o*_e_p0rCo_4**4*_changed_flag}\`
-`},{id:"nerd-mt19937-codevinci",ctfId:"0xfunctf-2026",title:"nerd",category:"Cryptography",date:"Mar 8, 2026",flag:"CodeVinci{I_hop3_y0u_d1dn7_sl0p_th1s_ch4lL_w1th_claude_uFf}",summary:"Exploited an MT19937 PRNG by reconstructing its internal state from leaked diag relationships, addressing in-place mutation and bit-by-bit temper reversal to forge a valid AES token.",tags:["MT19937","PRNG","State-Recovery","AES-ECB","Bit-by-bit"],content:`
+`},{id:"nerd-mt19937-codevinci",ctfId:"codevinci-2026",title:"nerd",category:"Cryptography",date:"Mar 8, 2026",flag:"CodeVinci{I_hop3_y0u_d1dn7_sl0p_th1s_ch4lL_w1th_claude_uFf}",summary:"Exploited an MT19937 PRNG by reconstructing its internal state from leaked diag relationships, addressing in-place mutation and bit-by-bit temper reversal to forge a valid AES token.",tags:["MT19937","PRNG","State-Recovery","AES-ECB","Bit-by-bit"],content:`
 # nerd
 
 ## Overview
